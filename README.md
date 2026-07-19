@@ -19,3 +19,13 @@ pnpm verify
 ```
 
 默认验证不调用真实模型，也不产生模型费用。
+
+## Cline 技术验证
+
+```bash
+pnpm spike:cline:check
+pnpm spike:cline:local
+pnpm spike:cline:hub
+```
+
+当前 `@cline/sdk@0.0.65` 的 Local 模式验证通过，Hub 模式被上游发布包缺陷阻塞。详见 `docs/spikes/cline-sdk-hub.md`。

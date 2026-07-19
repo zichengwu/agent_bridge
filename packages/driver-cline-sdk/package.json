@@ -5,7 +5,15 @@
   "type": "module",
   "exports": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "scripts": {
+    "spike:hub": "tsx src/spike/no-cost.ts hub",
+    "spike:local": "tsx src/spike/no-cost.ts local",
+    "test": "vitest run --root ../.. --config vitest.config.ts packages/driver-cline-sdk/src/spike"
+  },
   "dependencies": {
     "@cline/sdk": "0.0.65"
+  },
+  "devDependencies": {
+    "@cline/core": "0.0.65"
   }
 }
