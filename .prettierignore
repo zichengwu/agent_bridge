@@ -1,0 +1,5 @@
+docs/prd/
+pnpm-lock.yaml
+.pnpm-store/
+dist/
+coverage/

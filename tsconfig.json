@@ -1,0 +1,16 @@
+{
+  "files": [],
+  "references": [
+    { "path": "tsconfig.tools.json" },
+    { "path": "apps/bridge-mcp" },
+    { "path": "packages/artifacts-local" },
+    { "path": "packages/core" },
+    { "path": "packages/driver-cline-sdk" },
+    { "path": "packages/driver-generic-cli" },
+    { "path": "packages/driver-protocol" },
+    { "path": "packages/observability" },
+    { "path": "packages/schemas" },
+    { "path": "packages/storage-sqlite" },
+    { "path": "packages/worker-runtime" }
+  ]
+}

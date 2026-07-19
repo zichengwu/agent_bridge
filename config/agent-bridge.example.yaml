@@ -1,0 +1,17 @@
+# Agent Bridge 本地示例配置，不得在此文件中填写真实凭据。
+project:
+  id: example-project
+  workspace_root: /absolute/path/to/project
+
+limits:
+  timeout_seconds: 3600
+  max_review_cycles: 3
+  max_agent_count: 4
+
+context:
+  rollover_ratio: 0.7
+
+cline:
+  backend_mode: hub
+  provider_id: configured-provider
+  model_id: configured-model
