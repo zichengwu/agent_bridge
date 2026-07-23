@@ -4,7 +4,7 @@ Agent Bridge 是运行在开发者本机的单用户、单机协作控制层，�
 
 当前仓库已完成 MVP 工程初始化、Cline 技术 Spike 和 Agent Driver 选型。产品行为以 `docs/prd/agent-bridge-prd.md` 为基线；Bridge Core 只依赖版本化 Driver Protocol，不依赖具体 Agent SDK。
 
-Phase 2 第一开发切片与切片 2A 已经完成：`packages/driver-protocol` 提供版本为 `1.0` 的供应商无关 Driver Contract、统一事件类型和运行时断言；`packages/driver-opencode` 已实现 OpenCode `1.18.3` 主 Driver，并通过 Fake Runtime Contract 测试和完全无 Provider 的 Headless 控制面兼容性测试。OpenCode B-simulated 场景迁移和 Claude Agent 降级 Driver 仍属于后续切片。
+Phase 2 第一开发切片、切片 2A 和切片 2B 已经完成：`packages/driver-protocol` 提供版本为 `1.0` 的供应商无关 Driver Contract、统一事件类型和运行时断言；`packages/driver-opencode` 已实现 OpenCode `1.18.3` 主 Driver，并通过 Fake Runtime Contract、完全无 Provider 的 Headless 控制面兼容性测试，以及使用 loopback 确定性模拟 Provider 的正式 B-simulated 安全回归。Claude Agent 降级 Driver 仍属于后续切片。
 
 ## 环境要求
 
@@ -21,6 +21,14 @@ pnpm verify
 ```
 
 默认验证不调用真实模型，也不产生模型费用。
+
+OpenCode 正式 B-simulated 回归可单独运行：
+
+```bash
+pnpm test:driver-opencode:b-simulated
+```
+
+该回归使用临时隔离环境、一次性 Git worktree、合成 Token 和仅监听 `127.0.0.1` 的模拟 Provider；`realProviderRequests=0`。它用于证明正式 Driver 的本地兼容性与安全边界，不等同于真实 Provider 验证。
 
 ## Agent Driver 选型状态
 

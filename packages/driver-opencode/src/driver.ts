@@ -26,7 +26,7 @@ import {
 
 import { OPENCODE_DRIVER_ID, openCodeCapabilities } from "./capabilities.js";
 import { OpenCodeDriverError } from "./errors.js";
-import { OpenCodeEventMapper } from "./event-mapper.js";
+import { OpenCodeEventMapper, type OpenCodeEventMapperRecoveryState } from "./event-mapper.js";
 import {
   OpenCodeSdkRuntime,
   type OpenCodeRuntime,
@@ -45,7 +45,7 @@ interface RunRecord {
   readonly directory: string;
   readonly mapper: OpenCodeEventMapper;
   readonly events: EventBuffer;
-  readonly pumpController: AbortController;
+  pumpController: AbortController;
   pumpTask?: Promise<void>;
   readonly output: string[];
   readonly sessionIds: Set<string>;
@@ -58,10 +58,24 @@ export interface OpenCodeDriverOptions {
   readonly workDirectory: string;
   readonly now?: () => Date;
   readonly createRunId?: () => string;
+  readonly recoveryStates?: readonly OpenCodeDriverRecoveryState[];
 }
 
 export interface CreateOpenCodeDriverOptions
   extends OpenCodeDriverOptions, OpenCodeSdkRuntimeOptions {}
+
+export interface OpenCodeDriverRecoveryState {
+  readonly protocolVersion: typeof DRIVER_PROTOCOL_VERSION;
+  readonly runId: string;
+  readonly preparedTaskId: string;
+  readonly handle: RunHandle;
+  readonly events: readonly AgentEvent[];
+  readonly output: readonly string[];
+  readonly sessionIds: readonly string[];
+  readonly contextUsageBySession: readonly (readonly [sessionId: string, usage: ContextUsage])[];
+  readonly tokenUsage?: TokenUsage;
+  readonly mapper: OpenCodeEventMapperRecoveryState;
+}
 
 export class OpenCodeDriver implements AgentDriver {
   private readonly createRunId: () => string;
@@ -75,6 +89,9 @@ export class OpenCodeDriver implements AgentDriver {
   ) {
     this.now = options.now ?? (() => new Date());
     this.createRunId = options.createRunId ?? randomUUID;
+    for (const state of options.recoveryStates ?? []) {
+      this.restoreRun(state);
+    }
   }
 
   describeCapabilities() {
@@ -189,6 +206,7 @@ export class OpenCodeDriver implements AgentDriver {
     const record = this.requireRun(request.runId);
     assertRunActive(record);
     assertActiveSession(record, request.sessionId);
+    await this.ensureEventPump(record);
     const session = await this.runtime.getSession(request.sessionId, record.directory);
     if (session.id !== request.sessionId) {
       throw new OpenCodeDriverError(
@@ -203,6 +221,26 @@ export class OpenCodeDriver implements AgentDriver {
       state: "running",
     };
     return record.handle;
+  }
+
+  exportRecoveryState(runId: string): OpenCodeDriverRecoveryState {
+    const record = this.requireRun(runId);
+    assertRunActive(record);
+    record.mapper.assertSuccessorBoundary();
+    return {
+      protocolVersion: DRIVER_PROTOCOL_VERSION,
+      runId,
+      preparedTaskId: record.preparedTaskId,
+      handle: structuredClone(record.handle),
+      events: record.events.snapshot(),
+      output: [...record.output],
+      sessionIds: [...record.sessionIds],
+      contextUsageBySession: [...record.contextUsageBySession.entries()].map(
+        ([sessionId, usage]) => [sessionId, structuredClone(usage)] as const,
+      ),
+      tokenUsage: record.tokenUsage === undefined ? undefined : structuredClone(record.tokenUsage),
+      mapper: record.mapper.snapshotRecoveryState(),
+    };
   }
 
   streamEvents(runId: string): AsyncIterable<AgentEvent> {
@@ -415,6 +453,15 @@ export class OpenCodeDriver implements AgentDriver {
     }
   }
 
+  private async ensureEventPump(record: RunRecord): Promise<void> {
+    if (record.pumpTask !== undefined) {
+      return;
+    }
+    const stream = await this.runtime.subscribe(record.directory, record.pumpController.signal);
+    record.pumpTask = this.pumpEvents(record, stream);
+    void record.pumpTask;
+  }
+
   private append(record: RunRecord, events: readonly AgentEvent[]): void {
     for (const event of events) {
       if (event.type === "output.delta") {
@@ -422,6 +469,24 @@ export class OpenCodeDriver implements AgentDriver {
       }
       if (event.type === "usage.updated") {
         record.contextUsageBySession.set(event.sessionId, event.usage);
+      }
+      if (event.type === "permission.requested") {
+        record.handle = {
+          ...record.handle,
+          state: "waiting_permission",
+        };
+      }
+      if (event.type === "permission.responded") {
+        record.handle = {
+          ...record.handle,
+          state: "running",
+        };
+      }
+      if (event.type === "run.cancellation_requested") {
+        record.handle = {
+          ...record.handle,
+          state: "cancelling",
+        };
       }
       record.events.append(event);
 
@@ -483,6 +548,71 @@ export class OpenCodeDriver implements AgentDriver {
     }
     return record;
   }
+
+  private restoreRun(state: OpenCodeDriverRecoveryState): void {
+    assertProtocolVersion(state.protocolVersion);
+    const firstEvent = state.events[0];
+    const lastEvent = state.events.at(-1);
+    if (
+      state.handle.protocolVersion !== DRIVER_PROTOCOL_VERSION ||
+      state.handle.session.protocolVersion !== DRIVER_PROTOCOL_VERSION ||
+      state.runId !== state.handle.runId ||
+      state.handle.session.runId !== state.runId ||
+      state.handle.session.sessionId !== state.handle.session.externalSessionId ||
+      !state.sessionIds.includes(state.handle.session.sessionId) ||
+      state.events.length === 0 ||
+      firstEvent?.type !== "run.started" ||
+      firstEvent.preparedTaskId !== state.preparedTaskId ||
+      lastEvent?.sessionId !== state.handle.session.sessionId ||
+      state.events.some(
+        (event) => event.runId !== state.runId || !state.sessionIds.includes(event.sessionId),
+      ) ||
+      state.contextUsageBySession.some(
+        ([sessionId, usage]) =>
+          !state.sessionIds.includes(sessionId) ||
+          usage.sessionId !== sessionId ||
+          usage.protocolVersion !== DRIVER_PROTOCOL_VERSION,
+      ) ||
+      state.handle.state === "succeeded" ||
+      state.handle.state === "failed" ||
+      state.handle.state === "cancelled"
+    ) {
+      throw new OpenCodeDriverError(
+        "OPENCODE_RUN_NOT_FOUND",
+        "OpenCode recovery state is inconsistent",
+        { runId: state.runId },
+      );
+    }
+    if (this.runs.has(state.runId)) {
+      throw new OpenCodeDriverError(
+        "OPENCODE_RUN_NOT_FOUND",
+        "OpenCode recovery state contains a duplicate Run",
+        { runId: state.runId },
+      );
+    }
+    const events = state.events.map((event) => structuredClone(event));
+    const mapper = new OpenCodeEventMapper(state.runId, state.handle.session.sessionId, this.now, {
+      events,
+      state: state.mapper,
+    });
+    this.runs.set(state.runId, {
+      handle: structuredClone(state.handle),
+      preparedTaskId: state.preparedTaskId,
+      directory: this.options.workDirectory,
+      mapper,
+      events: new EventBuffer(events),
+      pumpController: new AbortController(),
+      output: [...state.output],
+      sessionIds: new Set(state.sessionIds),
+      contextUsageBySession: new Map(
+        state.contextUsageBySession.map(([sessionId, usage]) => [
+          sessionId,
+          structuredClone(usage),
+        ]),
+      ),
+      tokenUsage: state.tokenUsage === undefined ? undefined : structuredClone(state.tokenUsage),
+    });
+  }
 }
 
 export async function createOpenCodeDriver(
@@ -493,14 +623,24 @@ export async function createOpenCodeDriver(
     port: options.port,
     timeoutMs: options.timeoutMs,
     provider: options.provider,
+    executablePath: options.executablePath,
   });
-  return new OpenCodeDriver(runtime, options);
+  try {
+    return new OpenCodeDriver(runtime, options);
+  } catch (error) {
+    await runtime.close();
+    throw error;
+  }
 }
 
 class EventBuffer {
   private closed = false;
-  private readonly events: AgentEvent[] = [];
+  private readonly events: AgentEvent[];
   private readonly listeners = new Set<() => void>();
+
+  constructor(events: readonly AgentEvent[] = []) {
+    this.events = events.map((event) => structuredClone(event));
+  }
 
   append(event: AgentEvent): void {
     if (this.closed) {
@@ -513,6 +653,10 @@ class EventBuffer {
   close(): void {
     this.closed = true;
     this.notify();
+  }
+
+  snapshot(): AgentEvent[] {
+    return this.events.map((event) => structuredClone(event));
   }
 
   async *stream(): AsyncIterable<AgentEvent> {

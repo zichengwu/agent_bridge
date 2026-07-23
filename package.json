@@ -29,6 +29,7 @@
     "spike:drivers:b:collaboration": "pnpm --filter @agent-bridge/spike-driver-selection b:collaboration",
     "spike:drivers:b:report": "pnpm --filter @agent-bridge/spike-driver-selection b:report",
     "spike:drivers:b:cleanup": "pnpm --filter @agent-bridge/spike-driver-selection b:cleanup",
+    "test:driver-opencode:b-simulated": "vitest run packages/driver-opencode/tests/opencode-b-simulated.test.ts",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",

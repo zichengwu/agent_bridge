@@ -11,14 +11,20 @@ import {
 import { OpenCodeDriverError } from "./errors.js";
 import type { OpenCodeRuntimeEvent } from "./runtime.js";
 
+export interface OpenCodeEventMapperRecoveryState {
+  readonly emittedTextByPart: readonly (readonly [partId: string, text: string])[];
+}
+
 export class OpenCodeEventMapper {
   private activeSessionId: string;
+  private cancelling = false;
   private nextSequence = 1;
   private terminal = false;
   private readonly completedToolCalls = new Set<string>();
-  private readonly emittedTextParts = new Set<string>();
+  private readonly emittedTextByPart = new Map<string, string>();
   private readonly openToolCalls = new Set<string>();
   private readonly permissionToolCalls = new Map<string, string>();
+  private readonly deniedToolCalls = new Set<string>();
   private readonly respondedPermissions = new Set<string>();
   private readonly validator = new AgentEventSequenceValidator();
 
@@ -26,8 +32,20 @@ export class OpenCodeEventMapper {
     private readonly runId: string,
     sessionId: string,
     private readonly now: () => Date = () => new Date(),
+    recovery?: {
+      readonly events: readonly AgentEvent[];
+      readonly state: OpenCodeEventMapperRecoveryState;
+    },
   ) {
     this.activeSessionId = sessionId;
+    if (recovery !== undefined) {
+      for (const [partId, text] of recovery.state.emittedTextByPart) {
+        this.emittedTextByPart.set(partId, text);
+      }
+      for (const event of recovery.events) {
+        this.restoreEvent(event);
+      }
+    }
   }
 
   get sessionId(): string {
@@ -36,6 +54,12 @@ export class OpenCodeEventMapper {
 
   get isTerminal(): boolean {
     return this.terminal;
+  }
+
+  snapshotRecoveryState(): OpenCodeEventMapperRecoveryState {
+    return {
+      emittedTextByPart: [...this.emittedTextByPart.entries()],
+    };
   }
 
   start(preparedTaskId: string): AgentEvent {
@@ -64,6 +88,7 @@ export class OpenCodeEventMapper {
   }
 
   cancellationRequested(reason: string): AgentEvent {
+    this.cancelling = true;
     return this.emit({
       type: "run.cancellation_requested",
       reason,
@@ -86,6 +111,9 @@ export class OpenCodeEventMapper {
     this.assertPermissionResponse(input.permissionId, input.toolCallId);
     this.permissionToolCalls.delete(input.permissionId);
     this.respondedPermissions.add(input.permissionId);
+    if (input.decision === "deny") {
+      this.deniedToolCalls.add(input.toolCallId);
+    }
     return this.emit({
       type: "permission.responded",
       permissionId: input.permissionId,
@@ -110,7 +138,12 @@ export class OpenCodeEventMapper {
   }
 
   assertSuccessorBoundary(): void {
-    if (this.terminal || this.openToolCalls.size > 0 || this.permissionToolCalls.size > 0) {
+    if (
+      this.terminal ||
+      this.cancelling ||
+      this.openToolCalls.size > 0 ||
+      this.permissionToolCalls.size > 0
+    ) {
       throw new OpenCodeDriverError(
         "OPENCODE_SUCCESSOR_NOT_SAFE",
         "OpenCode successor Session requires a safe event boundary",
@@ -122,11 +155,19 @@ export class OpenCodeEventMapper {
     if (this.terminal) {
       return [];
     }
+    if (this.cancelling) {
+      return [];
+    }
 
     switch (event.type) {
       case "text": {
-        const delta = event.delta ?? (this.emittedTextParts.has(event.partId) ? "" : event.text);
-        this.emittedTextParts.add(event.partId);
+        const previousText = this.emittedTextByPart.get(event.partId) ?? "";
+        const delta =
+          event.delta ??
+          (event.text.startsWith(previousText)
+            ? event.text.slice(previousText.length)
+            : event.text);
+        this.emittedTextByPart.set(event.partId, event.text);
         if (delta.length === 0) {
           return [];
         }
@@ -155,7 +196,10 @@ export class OpenCodeEventMapper {
               toolCallId,
               kind: permissionKind(event.permission),
               title: event.title,
-              details: toJsonObject(event.metadata),
+              details: toJsonObject({
+                ...event.metadata,
+                patterns: event.patterns,
+              }),
             },
           }),
         ];
@@ -232,8 +276,9 @@ export class OpenCodeEventMapper {
     if (event.status === "completed" || event.status === "error") {
       this.openToolCalls.delete(event.callId);
       this.completedToolCalls.add(event.callId);
+      const denied = this.deniedToolCalls.has(event.callId);
       const error: DriverError | undefined =
-        event.status === "error"
+        event.status === "error" && !denied
           ? {
               code: "OPENCODE_TOOL_ERROR",
               message: "OpenCode tool failed",
@@ -244,7 +289,7 @@ export class OpenCodeEventMapper {
         this.emit({
           type: "tool.completed",
           toolCallId: event.callId,
-          outcome: event.status === "completed" ? "succeeded" : "failed",
+          outcome: event.status === "completed" ? "succeeded" : denied ? "denied" : "failed",
           output: event.output,
           error,
         }),
@@ -339,6 +384,48 @@ export class OpenCodeEventMapper {
       this.terminal = true;
     }
     return event;
+  }
+
+  private restoreEvent(event: AgentEvent): void {
+    if (event.runId !== this.runId) {
+      throw new OpenCodeDriverError(
+        "OPENCODE_RUN_NOT_FOUND",
+        "Recovery event does not reference the restored OpenCode Run",
+        { expected: this.runId, received: event.runId },
+      );
+    }
+    this.validator.accept(event);
+    this.nextSequence = event.sequence + 1;
+    this.activeSessionId = event.sessionId;
+    switch (event.type) {
+      case "tool.started":
+        this.openToolCalls.add(event.toolCallId);
+        break;
+      case "tool.completed":
+        this.openToolCalls.delete(event.toolCallId);
+        this.completedToolCalls.add(event.toolCallId);
+        break;
+      case "permission.requested":
+        this.permissionToolCalls.set(event.permission.permissionId, event.permission.toolCallId);
+        break;
+      case "permission.responded":
+        this.permissionToolCalls.delete(event.permissionId);
+        this.respondedPermissions.add(event.permissionId);
+        if (event.decision === "deny") {
+          this.deniedToolCalls.add(event.toolCallId);
+        }
+        break;
+      case "run.cancellation_requested":
+        this.cancelling = true;
+        break;
+      case "run.completed":
+      case "run.failed":
+      case "run.cancelled":
+        this.terminal = true;
+        break;
+      default:
+        break;
+    }
   }
 }
 

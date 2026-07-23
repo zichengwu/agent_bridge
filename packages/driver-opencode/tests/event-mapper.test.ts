@@ -78,4 +78,68 @@ describe("OpenCode 统一事件映射", () => {
       }),
     ).toThrowError(OpenCodeDriverError);
   });
+
+  it("忽略空文本快照并在完整 assistant 文本到达时只输出新增部分", () => {
+    const mapper = new OpenCodeEventMapper("run-text", "session-text", now);
+    mapper.start("prepared-text");
+
+    expect(
+      mapper.map({
+        type: "text",
+        sessionId: "session-text",
+        messageId: "message-text",
+        partId: "part-text",
+        text: "",
+      }),
+    ).toEqual([]);
+    expect(
+      mapper.map({
+        type: "text",
+        sessionId: "session-text",
+        messageId: "message-text",
+        partId: "part-text",
+        text: "Complete",
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        type: "output.delta",
+        delta: "Complete",
+      }),
+    ]);
+  });
+
+  it("取消请求后忽略迟到 Runtime 事件并保持 cancelled 为唯一终态", () => {
+    const mapper = new OpenCodeEventMapper("run-cancel", "session-cancel", now);
+    const events: AgentEvent[] = [
+      mapper.start("prepared-cancel"),
+      mapper.cancellationRequested("User cancelled"),
+    ];
+
+    expect(
+      mapper.map({
+        type: "tool",
+        sessionId: "session-cancel",
+        messageId: "message-late",
+        partId: "part-late",
+        callId: "tool-late",
+        toolName: "write",
+        status: "running",
+        input: { path: "late.txt" },
+      }),
+    ).toEqual([]);
+    expect(
+      mapper.map({
+        type: "session.idle",
+        sessionId: "session-cancel",
+      }),
+    ).toEqual([]);
+    events.push(mapper.cancelled("User cancelled"));
+
+    assertAgentEventSequence(events);
+    expect(events.map((event) => event.type)).toEqual([
+      "run.started",
+      "run.cancellation_requested",
+      "run.cancelled",
+    ]);
+  });
 });

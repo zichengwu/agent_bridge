@@ -39,4 +39,21 @@ describe("OpenCode Driver 能力和安全配置", () => {
       },
     });
   });
+
+  it("仅在显式兼容性策略中开放交互式权限", () => {
+    const config = buildOpenCodeConfig({
+      permissions: {
+        edit: "ask",
+        externalDirectory: "ask",
+      },
+    });
+
+    expect(config.permission).toEqual({
+      edit: "ask",
+      bash: "deny",
+      webfetch: "deny",
+      doom_loop: "deny",
+      external_directory: "ask",
+    });
+  });
 });

@@ -1,5 +1,5 @@
 import { createServer } from "node:net";
-import { delimiter, dirname, resolve } from "node:path";
+import { basename, delimiter, dirname, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
@@ -47,6 +47,7 @@ export interface OpenCodeRuntimePermissionRequested {
   readonly callId?: string;
   readonly permission: string;
   readonly title: string;
+  readonly patterns?: string | readonly string[];
   readonly metadata: Readonly<Record<string, unknown>>;
 }
 
@@ -121,6 +122,7 @@ export interface OpenCodeSdkRuntimeOptions {
   readonly port?: number;
   readonly timeoutMs?: number;
   readonly provider?: OpenCodeProviderConfiguration;
+  readonly executablePath?: string;
 }
 
 export class OpenCodeSdkRuntime implements OpenCodeRuntime {
@@ -198,10 +200,9 @@ export class OpenCodeSdkRuntime implements OpenCodeRuntime {
   ): Promise<AsyncIterable<OpenCodeRuntimeEvent>> {
     try {
       const subscription = await this.client.event.subscribe({
-        query: { directory },
         signal,
       });
-      return normalizeEventStream(subscription.stream);
+      return normalizeEventStream(subscription.stream, this.client, directory);
     } catch (error) {
       throw runtimeFailure("OpenCode event subscription failed", error);
     }
@@ -259,6 +260,10 @@ export class OpenCodeSdkRuntime implements OpenCodeRuntime {
   }
 
   async close(): Promise<void> {
+    await this.stopInstance();
+  }
+
+  private async stopInstance(): Promise<void> {
     this.server.close();
     this.serverController.abort();
     await delay(300);
@@ -276,10 +281,18 @@ async function startSdkInstance(
     "node_modules",
     ".bin",
   );
+  const executableDirectory =
+    options.executablePath === undefined ? packageBinDirectory : dirname(options.executablePath);
+  if (options.executablePath !== undefined && basename(options.executablePath) !== "opencode") {
+    throw new OpenCodeDriverError(
+      "OPENCODE_RUNTIME_ERROR",
+      "The isolated OpenCode executable must be named opencode",
+    );
+  }
   process.env.PATH =
     originalPath === undefined
-      ? packageBinDirectory
-      : `${packageBinDirectory}${delimiter}${originalPath}`;
+      ? executableDirectory
+      : `${executableDirectory}${delimiter}${originalPath}`;
   try {
     const port = options.port ?? (await reserveTcpPort());
     return await createOpencode({
@@ -323,19 +336,141 @@ function reserveTcpPort(): Promise<number> {
 
 async function* normalizeEventStream(
   stream: AsyncIterable<OpenCodeSdkEvent>,
+  client: Awaited<ReturnType<typeof createOpencode>>["client"],
+  directory: string,
 ): AsyncIterable<OpenCodeRuntimeEvent> {
+  const assistantMessageIds = new Set<string>();
+  const knownMessageIds = new Set<string>();
+  const pendingParts = new Map<string, OpenCodeSdkEvent[]>();
   for await (const event of stream) {
-    const normalized = normalizeSdkEvent(event);
+    if (event.type === "message.part.updated") {
+      const messageId = event.properties.part.messageID;
+      if (!knownMessageIds.has(messageId)) {
+        const pending = pendingParts.get(messageId) ?? [];
+        pending.push(event);
+        pendingParts.set(messageId, pending);
+        continue;
+      }
+    }
+    if (event.type === "message.updated") {
+      knownMessageIds.add(event.properties.info.id);
+      if (event.properties.info.role === "assistant") {
+        assistantMessageIds.add(event.properties.info.id);
+      } else {
+        assistantMessageIds.delete(event.properties.info.id);
+      }
+      const pending = pendingParts.get(event.properties.info.id) ?? [];
+      pendingParts.delete(event.properties.info.id);
+      for (const partEvent of pending) {
+        const normalizedPart = normalizeSdkEvent(partEvent, assistantMessageIds);
+        if (normalizedPart !== undefined) {
+          yield normalizedPart;
+        }
+      }
+    }
+    const normalized = normalizeSdkEvent(event, assistantMessageIds);
     if (normalized !== undefined) {
+      if (normalized.type === "session.idle") {
+        const messages = await client.session.messages({
+          path: { id: normalized.sessionId },
+          query: { directory },
+          throwOnError: true,
+        });
+        for (const message of messages.data) {
+          if (message.info.role !== "assistant") {
+            continue;
+          }
+          for (const part of message.parts) {
+            if (part.type === "text" && part.text.length > 0) {
+              yield {
+                type: "text",
+                sessionId: part.sessionID,
+                messageId: part.messageID,
+                partId: part.id,
+                text: part.text,
+              };
+            }
+          }
+        }
+      }
       yield normalized;
     }
   }
 }
 
-function normalizeSdkEvent(event: OpenCodeSdkEvent): OpenCodeRuntimeEvent | undefined {
+function normalizeSdkEvent(
+  event: OpenCodeSdkEvent,
+  assistantMessageIds: ReadonlySet<string>,
+): OpenCodeRuntimeEvent | undefined {
+  const genericEvent = event as unknown as {
+    readonly type: string;
+    readonly properties: Readonly<Record<string, unknown>>;
+  };
+  if (genericEvent.type === "permission.asked") {
+    const properties = genericEvent.properties;
+    const tool =
+      typeof properties.tool === "object" && properties.tool !== null
+        ? (properties.tool as Readonly<Record<string, unknown>>)
+        : undefined;
+    if (
+      typeof properties.id !== "string" ||
+      typeof properties.sessionID !== "string" ||
+      typeof properties.permission !== "string"
+    ) {
+      return undefined;
+    }
+    return {
+      type: "permission.requested",
+      sessionId: properties.sessionID,
+      permissionId: properties.id,
+      messageId: typeof tool?.messageID === "string" ? tool.messageID : properties.id,
+      callId: typeof tool?.callID === "string" ? tool.callID : undefined,
+      permission: properties.permission,
+      title: `OpenCode requests ${properties.permission}`,
+      patterns: Array.isArray(properties.patterns)
+        ? properties.patterns.filter((pattern): pattern is string => typeof pattern === "string")
+        : undefined,
+      metadata:
+        typeof properties.metadata === "object" && properties.metadata !== null
+          ? (properties.metadata as Readonly<Record<string, unknown>>)
+          : {},
+    };
+  }
+  if (genericEvent.type === "permission.replied") {
+    const properties = genericEvent.properties;
+    const permissionId =
+      typeof properties.permissionID === "string"
+        ? properties.permissionID
+        : typeof properties.requestID === "string"
+          ? properties.requestID
+          : undefined;
+    const response =
+      typeof properties.response === "string"
+        ? properties.response
+        : typeof properties.reply === "string"
+          ? properties.reply
+          : undefined;
+    if (
+      typeof properties.sessionID !== "string" ||
+      permissionId === undefined ||
+      response === undefined
+    ) {
+      return undefined;
+    }
+    return {
+      type: "permission.responded",
+      sessionId: properties.sessionID,
+      permissionId,
+      response,
+    };
+  }
+
   switch (event.type) {
     case "message.part.updated": {
       const { part } = event.properties;
+      if (!assistantMessageIds.has(part.messageID)) {
+        return undefined;
+      }
       if (part.type === "text") {
         return {
           type: "text",
@@ -371,14 +506,8 @@ function normalizeSdkEvent(event: OpenCodeSdkEvent): OpenCodeRuntimeEvent | unde
         callId: event.properties.callID,
         permission: event.properties.type,
         title: event.properties.title,
+        patterns: event.properties.pattern,
         metadata: event.properties.metadata,
-      };
-    case "permission.replied":
-      return {
-        type: "permission.responded",
-        sessionId: event.properties.sessionID,
-        permissionId: event.properties.permissionID,
-        response: event.properties.response,
       };
     case "message.updated": {
       const { info } = event.properties;
@@ -423,5 +552,34 @@ function normalizeSdkEvent(event: OpenCodeSdkEvent): OpenCodeRuntimeEvent | unde
 function runtimeFailure(message: string, cause: unknown): OpenCodeDriverError {
   return new OpenCodeDriverError("OPENCODE_RUNTIME_ERROR", message, {
     cause: cause instanceof Error ? cause.name : typeof cause,
+    reason: sanitizeRuntimeCause(cause),
   });
+}
+
+function sanitizeRuntimeCause(cause: unknown): string {
+  if (!(cause instanceof Error)) {
+    return typeof cause;
+  }
+  return cause.message
+    .replace(/(Bearer\s+)[^\s,;]+/gi, "$1[REDACTED]")
+    .replace(
+      /((?:api[_-]?key|x-api-key|access[_-]?token|authorization|cookie)["'\s:=]+)[^\s,"'}]+/gi,
+      "$1[REDACTED]",
+    )
+    .replace(/(?:\/[^\s:]+)+/g, (path) => classifyRuntimePath(path))
+    .slice(0, 500);
+}
+
+function classifyRuntimePath(path: string): string {
+  const roots: Array<readonly [string, string | undefined]> = [
+    ["WORK_DIRECTORY", process.cwd()],
+    ["ISOLATED_HOME", process.env.HOME],
+    ["ISOLATED_TEMP", process.env.TMPDIR],
+    ["ISOLATED_CONFIG", process.env.XDG_CONFIG_HOME],
+    ["ISOLATED_DATA", process.env.XDG_DATA_HOME],
+    ["ISOLATED_CACHE", process.env.XDG_CACHE_HOME],
+    ["OPENCODE_CONFIG", process.env.OPENCODE_CONFIG_DIR],
+  ];
+  const match = roots.find(([, root]) => root !== undefined && path.startsWith(root));
+  return match === undefined ? "[PATH]" : `[${match[0]}]`;
 }
