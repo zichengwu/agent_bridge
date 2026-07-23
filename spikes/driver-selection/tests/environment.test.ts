@@ -15,6 +15,7 @@ describe("driver-selection 隔离环境", () => {
       expect(isolation.environment.CODEX_HOME).toBe(isolation.codexHome);
       expect(isolation.environment.CLAUDE_CONFIG_DIR).toBe(isolation.claudeConfigDirectory);
       expect(isolation.environment.TMPDIR).toBe(isolation.tempDirectory);
+      expect(isolation.environment.CLAUDE_CODE_TMPDIR).toBe(isolation.tempDirectory);
       expect(isolation.environment.XDG_CONFIG_HOME).toBe(isolation.configDirectory);
       expect(isolation.environment.XDG_DATA_HOME).toBe(isolation.dataDirectory);
       expect(isolation.environment).not.toHaveProperty("OPENAI_API_KEY");

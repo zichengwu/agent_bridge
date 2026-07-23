@@ -88,6 +88,7 @@ export async function createIsolationEnvironment(
     XDG_CACHE_HOME: cacheDirectory,
     CODEX_HOME: codexHome,
     CLAUDE_CONFIG_DIR: claudeConfigDirectory,
+    CLAUDE_CODE_TMPDIR: tempDirectory,
     OPENCODE_CONFIG: openCodeConfigPath,
     OPENCODE_CONFIG_DIR: openCodeConfigDirectory,
     OPENCODE_CONFIG_CONTENT: JSON.stringify(OPENCODE_CONFIG),
