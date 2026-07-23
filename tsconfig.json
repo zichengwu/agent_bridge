@@ -7,6 +7,7 @@
     { "path": "packages/core" },
     { "path": "packages/driver-cline-sdk" },
     { "path": "packages/driver-generic-cli" },
+    { "path": "packages/driver-opencode" },
     { "path": "packages/driver-protocol" },
     { "path": "packages/observability" },
     { "path": "packages/schemas" },

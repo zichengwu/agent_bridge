@@ -57,6 +57,18 @@ importers:
 
   packages/driver-generic-cli: {}
 
+  packages/driver-opencode:
+    dependencies:
+      '@agent-bridge/driver-protocol':
+        specifier: workspace:*
+        version: link:../driver-protocol
+      '@opencode-ai/sdk':
+        specifier: 1.18.3
+        version: 1.18.3
+      opencode-ai:
+        specifier: 1.18.3
+        version: 1.18.3
+
   packages/driver-protocol: {}
 
   packages/observability: {}

@@ -4,7 +4,7 @@ Agent Bridge 是运行在开发者本机的单用户、单机协作控制层，�
 
 当前仓库已完成 MVP 工程初始化、Cline 技术 Spike 和 Agent Driver 选型。产品行为以 `docs/prd/agent-bridge-prd.md` 为基线；Bridge Core 只依赖版本化 Driver Protocol，不依赖具体 Agent SDK。
 
-Phase 2 第一开发切片已经完成：`packages/driver-protocol` 现提供版本为 `1.0` 的供应商无关 Driver Contract、统一事件类型和运行时断言，并通过完全无 Provider 的 Fake Driver Contract 测试覆盖启动、权限、恢复、Session 滚动、取消、结果和健康检查。正式 OpenCode 与 Claude Agent Driver 包尚未创建。
+Phase 2 第一开发切片与切片 2A 已经完成：`packages/driver-protocol` 提供版本为 `1.0` 的供应商无关 Driver Contract、统一事件类型和运行时断言；`packages/driver-opencode` 已实现 OpenCode `1.18.3` 主 Driver，并通过 Fake Runtime Contract 测试和完全无 Provider 的 Headless 控制面兼容性测试。OpenCode B-simulated 场景迁移和 Claude Agent 降级 Driver 仍属于后续切片。
 
 ## 环境要求
 
