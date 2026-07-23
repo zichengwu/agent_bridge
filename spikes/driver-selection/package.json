@@ -1,0 +1,29 @@
+{
+  "name": "@agent-bridge/spike-driver-selection",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "check": "pnpm build && node dist/cli.js check",
+    "opencode": "pnpm build && node dist/cli.js opencode",
+    "claude": "pnpm build && node dist/cli.js claude",
+    "codex": "pnpm build && node dist/cli.js codex",
+    "repeat": "pnpm build && node dist/cli.js repeat",
+    "report": "pnpm build && node dist/cli.js report",
+    "b:preflight": "pnpm build && node dist/cli.js b:preflight",
+    "b:check": "pnpm build && node dist/cli.js b:check",
+    "opencode:b": "pnpm build && node dist/cli.js opencode:b",
+    "claude:b": "pnpm build && node dist/cli.js claude:b",
+    "b:collaboration": "pnpm build && node dist/cli.js b:collaboration",
+    "b:report": "pnpm build && node dist/cli.js b:report",
+    "b:cleanup": "pnpm build && node dist/cli.js b:cleanup",
+    "test": "vitest run --root ../.. --config vitest.config.ts spikes/driver-selection/tests"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.215",
+    "@opencode-ai/sdk": "1.18.3",
+    "@openai/codex-sdk": "0.144.6",
+    "opencode-ai": "1.18.3"
+  }
+}

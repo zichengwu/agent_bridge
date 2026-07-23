@@ -25,6 +25,8 @@ worktrees/
 .agents/
 .codex/
 docs/development/implementation-plan.md
+docs/development/agent-driver-selection-spike-plan.md
+docs/development/agent-driver-selection-b-layer-plan.md
 
 # 编辑器与系统文件
 .DS_Store

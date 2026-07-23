@@ -1,18 +1,18 @@
-# PRD：Agent Bridge——Codex 与 Cline 协作控制层
+# PRD：Agent Bridge——Codex 与 Code Agent 协作控制层
 
 ## 0. 文档状态
 
 - PRD 标识：`PRD-AGENT-BRIDGE-001`
-- 版本：`v1.1`
+- 版本：`v1.3`
 - 状态：研发就绪
 - 文档深度：完整 PRD
 - 负责人：待指定
-- 最近更新：2026-07-19
+- 最近更新：2026-07-22
 - 目标版本：MVP
 - 基线或关联提交：暂无
-- 替代版本：`v1.0`
+- 替代版本：`v1.2`
 - 关联原型：不适用；MVP 为本地 Harness 和控制接口，不包含图形界面
-- 本次主要变更：新增需求级 Session 隔离、上下文滚动、任务关系和结构化 Handoff 规则；补齐数据对象、控制接口、异常处理与验收场景；保持研发就绪状态
+- 本次主要变更：完成 Agent Driver 统一选型门禁；确定 OpenCode 为 MVP 主 Driver、Claude Agent SDK 为 MVP 降级 Driver；记录两者共用 DeepSeek 的 Provider 故障域、Codex SDK B 层延期和真实 Provider 测试的持续授权边界
 
 ### 0.1 来源状态说明
 
@@ -23,40 +23,41 @@
 
 ### 0.2 需求认知面板
 
-- 目标用户：使用 Codex 与 Cline 共同开发软件的单一开发者。
-- 核心场景：由 Codex 负责项目级规划、审查和集成，由 Cline 组织不同模型和角色完成开发、测试、审查等执行任务。
-- 当前做法：Codex 与 Cline 是独立 App，默认不共享会话、任务状态、权限和工作区。
+- 目标用户：使用 Codex 与一个或多个 Code Agent 共同开发软件的单一开发者。
+- 核心场景：由 Codex 负责项目级规划、审查和集成，由受管 Code Agent 完成开发、测试、审查等执行任务。
+- 当前做法：Codex 与各类 Code Agent 是独立工具，默认不共享会话、任务状态、权限和工作区。
 - 主要问题：缺少中立控制层，导致信息难以结构化传递，业务约束可能漂移；不同需求长期复用同一对话还会造成上下文污染，而强制切换窗口又可能丢失关联任务的必要成果。
 - 期望结果：通过独立 Agent Bridge 建立可审计、可隔离、可恢复、可验证的协作流程。
-- 已确认事实：需要独立 Agent Bridge；MVP 采用本地、单用户、单机部署；技术栈采用 Node.js 22+、TypeScript 和 pnpm monorepo；Cline SDK 为主接入路径，CLI 为可选降级路径；正常运行使用 Cline Hub，测试使用 local backend；OQ-004 全部规则已定稿；不同需求使用独立 Agent Session，相关需求通过结构化摘要传递必要信息。
+- 已确认事实：需要独立 Agent Bridge；MVP 采用本地、单用户、单机部署；技术栈采用 Node.js 22+、TypeScript 和 pnpm monorepo；Bridge Core 只依赖版本化 Agent Driver 协议；OpenCode `1.18.3` 为 MVP 主 Driver，Claude Agent SDK `0.3.215` / Claude Code `2.1.215` 为 MVP 降级 Driver；OQ-004 全部规则已定稿；不同需求使用独立 Agent Session，相关需求通过结构化摘要传递必要信息。
 - 合理推断：MVP 主要面向个人开发环境，而不是团队级云平台。
-- 待验证假设：Cline SDK 的实际事件、角色、模型、取消、Session 恢复、快照和上下文用量能力满足 Driver 要求；缺失能力由 Bridge 估算、持久化检查点或 Generic CLI Driver 补偿。该技术验证不改变产品行为基线。
+- 已验证事实：OpenCode 与 Claude Agent SDK 均已通过 A 层、B-simulated 和 B-real 的适用 Session、事件、取消、权限、恢复、隔离、结果、用量和清理硬门禁；精确上下文用量等增强能力仍允许由 Bridge 估算或持久化机制补偿，但稳定 Session、确定取消和安全隔离不得静默降级。
+- 待验证假设：后续 Provider 级灾备可以在不改变 Driver Protocol 和领域核心的前提下接入；当前 OpenCode 与 Claude Agent SDK 共用 DeepSeek，只提供 Driver 级降级。
 - 开放问题：GitHub 是否进入 MVP；此项不阻塞研发，MVP 默认只依赖本地 Git。
 
 当前判断：
 
-- 当前阶段：已具备研发交付条件。
+- 当前阶段：领域内核与正式 Agent Driver 均具备研发条件；具体 Driver 必须继续保持进程外隔离和协议边界。
 - 目标交付与 PRD 深度：完整 PRD。
-- 最大不确定性：Cline SDK/Hub 的 Session 恢复、上下文用量和事件粒度；已通过 Driver 能力声明、本地估算、持久化检查点与 CLI/Generic Driver 降级路径提供隔离方案。
-- 下一步：基于 `v1.1` 启动研发任务，先完成 Cline SDK/Hub 的 Session 创建、恢复和上下文用量技术 Spike，再按阶段实施完整 MVP。
+- 最大不确定性：两个已选 Driver 共用 DeepSeek 的 Provider 故障域，以及正式 Driver Contract 与 Spike 事件映射的一致性；必须通过 Contract 测试和默认无费用的兼容性测试持续约束。
+- 下一步：基于 `v1.3` 固化正式 Driver Contract、能力声明和事件映射，再实现独立 OpenCode Driver 与 Claude Agent Driver 包。
 
 ## 1. 执行摘要
 
-Agent Bridge 是运行在开发者本机的单用户、单机协作控制层。它位于 Codex 与 Cline 之间，通过结构化任务合同、任务状态机、需求级 Session 隔离、版本化 Handoff、权限策略、独立 Git worktree、执行事件和验证产物，实现两个独立 Agent App 的可靠协作。
+Agent Bridge 是运行在开发者本机的单用户、单机协作控制层。它位于 Codex 与可替换的 Code Agent 之间，通过结构化任务合同、任务状态机、需求级 Session 隔离、版本化 Handoff、权限策略、独立 Git worktree、执行事件和验证产物，实现不同 Agent 工具之间的可靠协作。
 
-Codex 负责需求、架构、任务合同、最终审查与集成；Cline 负责执行层任务拆分以及 Developer、Tester、Reviewer 等角色的调度；Agent Bridge 负责双方之间的 Harness 控制、任务状态、隔离、权限、超时、取消、审计和结果传递；Git 与 CI/本地验证命令作为代码和质量结果的权威来源。
+Codex 负责需求、架构、任务合同、最终审查与集成；受管 Code Agent 负责 Developer、Tester、Reviewer 等执行角色；Agent Bridge 负责双方之间的 Harness 控制、任务状态、隔离、权限、超时、取消、审计和结果传递；Git 与 CI/本地验证命令作为代码和质量结果的权威来源。
 
-系统不共享 Codex 与 Cline 的完整聊天记录，不传递模型内部思考，不允许两个系统互相无限调用。新需求继承经过筛选且可追溯的事实、接口和成果，而不是继承上一个需求的对话历史。
+系统不共享 Codex 与受管 Code Agent 的完整聊天记录，不传递模型内部思考，不允许执行 Agent 反向调用 Codex 形成循环。新需求继承经过筛选且可追溯的事实、接口和成果，而不是继承上一个需求的对话历史。
 
 ## 2. 背景与问题定义
 
 ### 2.1 原始需求输入
 
-用户希望组合 Codex 和 Cline 完成项目开发，并让不同 Agent 承担开发、测试、代码审查、协调等角色。由于两个工具是独立 App，需要解决信息传递、业务约束、隔离与交互问题，因此决定开发独立 Agent Bridge。用户进一步指出：同一需求的多轮修改适合延续上下文，但不同需求长期放在同一对话会互相干扰；新需求应独立启动，同时相关任务需要继承上一任务完成后的必要概要信息。
+用户最初希望组合 Codex 和 Cline 完成项目开发，并让不同 Agent 承担开发、测试、代码审查、协调等角色。Cline SDK/Hub 技术 Spike 随后证明当前发布版本不能满足主路径门禁，因此产品目标被提升为连接 Codex 与可替换 Code Agent，而不是绑定某个具体工具。用户进一步指出：同一需求的多轮修改适合延续上下文，但不同需求长期放在同一对话会互相干扰；新需求应独立启动，同时相关任务需要继承上一任务完成后的必要概要信息。
 
 ### 2.2 问题陈述
 
-> 对于同时使用 Codex 与 Cline 的开发者，在组织多 Agent 完成软件项目时，由于两个工具缺少共享的任务协议、状态、权限和工作区控制，难以安全地完成任务交接、并行执行、结果审查和失败恢复，可能导致上下文漂移、代码冲突、权限越界、成本失控和错误合并。
+> 对于同时使用 Codex 与 Code Agent 的开发者，在组织多 Agent 完成软件项目时，由于不同工具缺少共享的任务协议、状态、权限和工作区控制，难以安全地完成任务交接、并行执行、结果审查和失败恢复，可能导致上下文漂移、代码冲突、权限越界、成本失控和错误合并。
 
 ### 2.3 影响
 
@@ -72,8 +73,8 @@ Codex 负责需求、架构、任务合同、最终审查与集成；Cline 负�
 
 ### 3.1 核心用户
 
-- 本期核心用户：在一台开发机上使用 Codex 与 Cline 的单一开发者。
-- 次要用户：后续可能扩展到使用其他 Agent 工具的开发者。
+- 本期核心用户：在一台开发机上使用 Codex 与受管 Code Agent 的单一开发者。
+- 次要用户：后续接入更多 Agent 工具或远程 Worker 的开发者。
 - 本期不覆盖：多人团队、组织管理员、云端 Worker 运维人员。
 
 ### 3.2 关键角色
@@ -82,10 +83,10 @@ Codex 负责需求、架构、任务合同、最终审查与集成；Cline 负�
 - Codex Coordinator：需求澄清、架构、任务合同和项目级协调。
 - Codex Integrator：最终审查、冲突处理、回归和集成。
 - Agent Bridge：控制面和权威任务状态源。
-- Cline Coordinator：执行层任务拆分与角色调度。
-- Cline Developer：指定范围内的产品代码开发。
-- Cline Tester：测试开发和执行，不修改产品代码。
-- Cline Reviewer：只读审查，不直接修复代码。
+- Execution Coordinator：执行层任务拆分与角色调度；只有 Driver 声明支持时启用。
+- Developer Agent：指定范围内的产品代码开发。
+- Tester Agent：测试开发和执行，不修改产品代码。
+- Reviewer Agent：只读审查，不直接修复代码。
 - Git：代码版本权威来源。
 - CI 或 Bridge Verification：可重复质量门禁。
 
@@ -93,10 +94,10 @@ Codex 负责需求、架构、任务合同、最终审查与集成；Cline 负�
 
 ### 4.1 产品目标
 
-1. Codex 能以结构化接口创建、启动、查询、反馈和取消 Cline 任务。
+1. Codex 能以结构化接口创建、启动、查询、反馈和取消受管 Agent 任务。
 2. 每个写入任务在独立分支和 worktree 中执行。
 3. 业务规则、范围、权限和验收命令随任务合同传递并可追溯。
-4. Bridge 独立验证 Cline 产物，而不是依赖 Agent 自述。
+4. Bridge 独立验证 Agent 产物，而不是依赖 Agent 自述。
 5. 任一任务均可追溯到输入版本、执行角色、模型、事件、commit 和验证结果。
 6. 失败、取消、超时、重启和返工有确定的恢复路径。
 7. 不同需求在独立 Agent Session 中执行，相关任务通过版本化交接包传递最小必要上下文。
@@ -109,10 +110,10 @@ Codex 负责需求、架构、任务合同、最终审查与集成；Cline 负�
 - 不支持跨机器或分布式 Worker。
 - 不自动部署生产环境。
 - 不自动合并 `main`。
-- 不让 Codex 与 Cline 共享完整会话或内部思考。
-- 不以 Codex、VS Code 或 Cline 的可见 UI 窗口作为任务隔离和状态判断的权威来源。
-- 不允许 Cline 反向调用 Codex 形成循环编排。
-- MVP 不通用化支持全部 Code Agent 产品。
+- 不让 Codex 与受管 Code Agent 共享完整会话或内部思考。
+- 不以 Codex、IDE 或具体 Agent 的可见 UI 窗口作为任务隔离和状态判断的权威来源。
+- 不允许执行 Agent 反向调用 Codex 形成循环编排。
+- MVP 不同时正式支持全部 Code Agent 产品，只实现一个主 Driver 和一个降级 Driver。
 
 ### 4.3 成功指标
 
@@ -149,7 +150,9 @@ Codex
 Agent Bridge
 任务协议 / 状态机 / 权限 / 隔离 / 审计 / 超时 / 产物传递
   ↓
-Cline Coordinator
+OpenCode 主 Driver / Claude Agent SDK 降级 Driver
+  ↓
+Execution Coordinator（可选能力）
   ├── Developer
   ├── Tester
   ├── Reviewer
@@ -162,7 +165,7 @@ Git + CI 或本地验证
 
 - **本地运行**：Bridge、任务状态、日志和 worktree 位于开发者电脑；允许访问模型 API、Git 远程和依赖源。
 - **单用户**：只服务一个操作者，不开发账号、RBAC 和租户隔离；不限制 Agent 数量。
-- **单机运行**：Codex、Bridge、Cline 和 Git 工作区位于同一台电脑，不调度远程 Worker。
+- **单机运行**：Codex、Bridge、受管 Code Agent 和 Git 工作区位于同一台电脑，不调度远程 Worker。
 
 ### 5.4 已确认技术架构
 
@@ -175,7 +178,7 @@ Git + CI 或本地验证
 | Codex 接口 | MCP stdio | Streamable HTTP MCP 与远程认证 |
 | 管理接口 | 本地 CLI；HTTP/JSON + OpenAPI 作为预留适配器 | API Gateway、OIDC 和团队权限 |
 | Agent Driver | 版本化 JSON Schema；本地 JSON-RPC/JSONL over stdio | WebSocket 或 gRPC 远程 Worker 协议 |
-| Cline 接入 | 独立 Driver 子进程使用 `ClineCore`；正常运行 `backendMode: hub`，测试使用 `local`；CLI 为可选降级和诊断路径 | `remote` backend 与独立 Cline Worker 服务 |
+| Agent 接入 | OpenCode 主 Driver + Claude Agent SDK 降级 Driver；具体 SDK、Server 或 CLI 只存在于独立 Driver 子进程 | 远程 Driver、更多 Provider 与独立 Worker 服务 |
 | 本地存储 | SQLite，通过 Repository 接口访问 | PostgreSQL |
 | 事件投递 | 进程内 Dispatcher + 持久化 Outbox | NATS JetStream 或等效消息系统 |
 | Artifact | 本地文件系统 | S3 兼容对象存储 |
@@ -191,34 +194,33 @@ agent-bridge monorepo
 ├── bridge-core            # 任务、状态机、策略和调度；不得依赖具体 Agent SDK
 ├── bridge-mcp             # Codex 控制接口
 ├── driver-protocol        # Agent 能力和生命周期协议
-├── cline-sdk-driver       # 独立子进程，内部使用 @cline/sdk
-├── generic-cli-driver     # Cline CLI 及其他 CLI Agent 的降级/通用适配
+├── driver-opencode        # OpenCode 主 Driver，独立子进程
+├── driver-claude-agent    # Claude Agent SDK 降级 Driver，独立子进程
 ├── worker-runtime         # worktree、进程、超时、取消和权限隔离
 └── storage                # SQLite、Outbox 和 Artifact 索引
 ```
 
-#### Cline Hub 运行模式
+#### Driver 运行模式
 
 ```text
 Agent Bridge
   ↓ Driver Protocol
-Cline SDK Driver（独立子进程、ClineCore Client）
-  ↓ backendMode: hub
-Cline Hub
-  ├── Spoke Worker：执行 Agent Loop 和工具调用
-  └── VS Code Cline 插件：可选观察、审批和人工接管客户端
+OpenCode 主 Driver 或 Claude Agent SDK 降级 Driver（独立子进程）
+  ↓ SDK / local server / structured CLI
+Code Agent Runtime
+  └── Agent Loop、工具调用和 Session 状态
 ```
 
-- 正常本地运行必须使用 `backendMode: hub`；Bridge 负责发现或启动兼容的本地 Hub。
-- 单元测试、无后台进程的集成测试可使用 `backendMode: local`。
-- 未来云端环境使用 `backendMode: remote` 或等效远程 Worker Driver。
-- VS Code 插件不是 Bridge 的执行依赖，只是连接同一 Hub/Session 的可选客户端；插件退出不应中止任务。
-- Cline Teams 的编排仍由 Cline SDK/Hub 和 Bridge 控制，不依赖 VS Code 插件提供团队调度界面。
-- `@cline/sdk` 是必需运行依赖；Cline CLI 是可选降级与诊断依赖。CLI 缺失时主路径继续运行，但健康检查必须报告 CLI 降级不可用。
+- OpenCode 主 Driver 与 Claude Agent SDK 降级 Driver 已通过统一 Spike 硬门禁；其 SDK 只能成为对应 Driver 包的运行依赖，不得进入 Bridge Core。
+- Bridge 负责 Driver 子进程生命周期、事件持久化、权限决策、超时和取消；具体 Agent UI 或 IDE 插件不是执行依赖。
+- Driver 必须声明 Session、恢复、事件、取消、权限、使用量和分叉等能力；Bridge 不得根据产品名称猜测能力。
+- 多观察端由 Bridge 基于权威事件日志提供扇出；上游 Agent 原生多客户端只作为非阻塞增强项。
+- 单元和集成测试默认使用 Fake Driver；候选的真实 SDK/Server 只在兼容性测试和显式授权的 Provider 测试中运行。
+- 未来云端环境使用远程 Worker Driver；不得要求领域核心理解某个候选的本地 Session 或 Hub 语义。
 
 #### Agent Driver 协议
 
-Bridge Core 只能依赖统一 Driver 接口，不能直接导入 `@cline/sdk`。Driver 至少提供以下能力：
+Bridge Core 只能依赖统一 Driver 接口，不能直接导入任何具体 Agent SDK。Driver 至少提供以下能力：
 
 ```ts
 interface AgentDriver {
@@ -256,7 +258,7 @@ Driver 必须返回可持久化的外部 Session ID，并声明是否支持精�
 - 任务合同和结果 JSON Schema。
 - 任务状态机与事件日志。
 - Codex 控制接口。
-- Cline 执行适配器。
+- OpenCode `1.18.3` 主 Agent Driver。
 - 固定角色模板。
 - Git 分支和 worktree 隔离。
 - 路径和工具权限策略。
@@ -268,7 +270,7 @@ Driver 必须返回可持久化的外部 Session ID，并声明是否支持精�
 - 任务关系图及关联交接包选择。
 - 独立验收命令执行。
 - 本地持久化与崩溃恢复。
-- 可选 Cline CLI 降级和诊断路径；CLI 未安装不得阻塞 SDK/Hub 主路径。
+- Claude Agent SDK `0.3.215` / Claude Code `2.1.215` 降级 Driver；降级组件缺失不得阻塞主 Driver 健康检查和运行。
 - 单元测试、集成测试和临时 Git 仓库端到端测试。
 
 ### 6.2 后续范围
@@ -277,7 +279,7 @@ Driver 必须返回可持久化的外部 Session ID，并声明是否支持精�
 - 可视化任务看板。
 - 跨机器 Worker。
 - 多用户和组织级权限。
-- 其他 Agent 适配器。
+- 更多 Agent 适配器。
 - 成本预算、配额和报表。
 
 ### 6.3 明确不做
@@ -287,7 +289,7 @@ Driver 必须返回可持久化的外部 Session ID，并声明是否支持精�
 - 将模型 API Key 存入任务数据库。
 - 将完整 Agent 会话作为协作协议。
 - 让新需求隐式继承上一需求的完整聊天记录或全部历史 Handoff。
-- 由 Cline 修改 Codex 定义的业务规则或验收标准。
+- 由执行 Agent 修改 Codex 定义的业务规则或验收标准。
 
 ## 7. 端到端流程
 
@@ -298,9 +300,9 @@ Driver 必须返回可持久化的外部 Session ID，并声明是否支持精�
 3. Bridge 将任务置为 `VALIDATED`。
 4. Codex 或用户批准启动任务。
 5. Bridge 获取写入租约，创建任务分支和独立 worktree。
-6. Bridge 按角色模板启动 Cline Coordinator 或执行 Agent。
-7. Cline 在限定工作区内执行并报告事件。
-8. Cline 提交 commit 和标准化结果。
+6. Bridge 按角色模板和能力声明启动选定 Driver 中的执行 Agent。
+7. 执行 Agent 在限定工作区内执行并报告事件。
+8. 执行 Agent 提交 commit 和标准化结果。
 9. Bridge 检查 Git diff 是否越权，并独立执行验收命令。
 10. Bridge 将结果转为 `REVIEW_REQUIRED`，交给 Codex。
 11. Codex选择批准、提交结构化修改意见或取消。
@@ -311,13 +313,13 @@ Driver 必须返回可持久化的外部 Session ID，并声明是否支持精�
 1. Codex 提交带文件、位置、严重级别和期望行为的 finding。
 2. Bridge 校验 task version、run 和 commit。
 3. Bridge 增加审查轮次，将状态置为 `CHANGES_REQUESTED`。
-4. Cline 在原任务分支继续修改。
+4. 执行 Agent 在原任务分支继续修改。
 5. Bridge 对新 commit 重新执行全部验证。
 6. 超过最大审查轮次后停止自动循环，等待用户决定。
 
 ### 7.3 失败与恢复
 
-- Cline 异常退出：记录退出码和错误；仅 Provider 瞬时错误可在单次 run 内有限重试，整个 Agent 任务不自动重跑。
+- Driver 或 Agent 异常退出：记录退出码和错误；仅 Provider 瞬时错误可在单次 run 内有限重试，整个 Agent 任务不自动重跑。
 - Bridge 重启：运行中任务标为 `INTERRUPTED`，不得自动判定成功。
 - base commit 过期：拒绝启动或要求重新建立基线。
 - worktree 越权修改：任务失败，不进入待合并状态。
@@ -345,10 +347,10 @@ Driver 必须返回可持久化的外部 Session ID，并声明是否支持精�
 
 | 角色 | 查看 | 写产品代码 | 写测试 | 执行命令 | 合并 | 特殊限制 |
 |---|---:|---:|---:|---:|---:|---|
-| Codex Coordinator | 是 | 否 | 否 | 只读检查 | 否 | 不直接执行 Cline 内部任务 |
+| Codex Coordinator | 是 | 否 | 否 | 只读检查 | 否 | 不直接执行受管 Agent 内部任务 |
 | Codex Integrator | 是 | 是 | 是 | 是 | 经用户批准 | 仅在最终集成阶段写入 |
 | Bridge | 必要范围 | 管理工作区 | 否 | 策略控制 | 否 | 不做业务决策 |
-| Cline Coordinator | 是 | 否 | 否 | 状态检查 | 否 | 不修改任务合同 |
+| Execution Coordinator | 是 | 否 | 否 | 状态检查 | 否 | 不修改任务合同；仅在 Driver 支持时启用 |
 | Developer | 是 | 指定目录 | 按任务合同 | 允许列表 | 否 | 一个文件同一时间一个 Owner |
 | Tester | 是 | 否 | 指定目录 | 测试命令 | 否 | 不得通过改产品代码让测试通过 |
 | Reviewer | 是 | 否 | 否 | 只读检查 | 否 | 只输出 finding |
@@ -374,19 +376,22 @@ Driver 必须返回可持久化的外部 Session ID，并声明是否支持精�
 ### FR-003：Codex 控制接口
 
 - 状态：已决策
-- 来源：Agent Bridge 作为 Codex 与 Cline Harness 控制层的既定方向；用户于 2026-07-19 接受 MCP 接入建议。
+- 来源：Agent Bridge 作为 Codex 与 Code Agent Harness 控制层的既定方向；用户于 2026-07-19 接受 MCP 接入建议。
 - 优先级：Must
 - 主要行为：支持创建任务和版本、声明关系、准备 Context Package、启动、查询、反馈、Session 滚动、取消和标记完成。
 - 接口形态：MVP 使用 MCP stdio；预留 Streamable HTTP MCP 适配器，不在 MVP 启用远程模式。
 
-### FR-004：Cline 执行适配
+### FR-004：Agent Driver 执行适配
 
 - 状态：已决策
-- 来源：用户确认使用 Cline 与 Codex 搭配，并于 2026-07-19 接受 SDK 主路径、CLI 降级路径建议。
+- 来源：用户于 2026-07-19 确认解除 Cline 唯一主路径绑定并采用统一 Driver Spike 选型；2026-07-22 确认接受 B-real 结果并完成最终选型。
 - 优先级：Must
-- 主要行为：启动 Cline、传递角色和 Context Package、返回稳定 Session ID、接收事件和上下文用量、创建后继 Session、取消任务并收集结果。
-- 适配方式：`@cline/sdk` 的 `ClineCore` 运行在独立 Cline Driver 子进程；正常运行使用 `backendMode: hub`，测试使用 `local`；Cline CLI 作为可选能力降级、故障诊断和兼容路径。
-- 多客户端：Bridge 创建的 Hub Session 允许 VS Code Cline 插件作为可选客户端附着；插件不得成为任务状态、权限或完成判断的权威来源。
+- 主要行为：启动受管 Agent、传递角色和 Context Package、返回稳定 Session ID、接收结构化事件和上下文用量、创建后继 Session、处理权限、取消任务并收集结果。
+- 适配方式：具体 SDK、Server、JSONL 或 CLI 接口运行在独立 Driver 子进程；Bridge Core 只依赖版本化 Driver Protocol。
+- 选型门禁：候选必须通过安装、Headless、Session、恢复、事件、取消、权限、worktree 隔离、结果、脱敏和可复现性硬门禁；主 Driver 与降级 Driver 在 Spike 报告中确定。
+- MVP 实现：OpenCode `1.18.3` 为主 Driver；Claude Agent SDK `0.3.215` / Claude Code `2.1.215` 为降级 Driver；Codex SDK 保留 A 层证据但本轮 B 层延期。
+- Provider 边界：MVP 两个 Driver 均使用 DeepSeek V4 Pro，因此只提供 Driver 级降级，不承诺 Provider 级灾备；任何真实 Provider 兼容性测试继续要求逐次费用授权。
+- 观察接口：Bridge 持久化权威事件并向观察端扇出；Agent 原生多客户端或 IDE 附着不是 MVP 硬依赖。
 
 ### FR-005：角色模板
 
@@ -426,7 +431,7 @@ Driver 必须返回可持久化的外部 Session ID，并声明是否支持精�
 ### FR-010：审查与返工
 
 - 状态：已决策
-- 来源：Codex 最终 Reviewer/Integrator 与 Cline 执行层的分工。
+- 来源：Codex 最终 Reviewer/Integrator 与受管 Agent 执行层的分工。
 - 优先级：Must
 - 主要行为：Codex提交结构化 finding；Bridge 控制有限次数的返工循环。
 
@@ -443,7 +448,7 @@ Driver 必须返回可持久化的外部 Session ID，并声明是否支持精�
 - 来源：为 MCP 或适配器异常提供人工兜底。
 - 优先级：Should
 - 主要行为：提供任务列表、详情、事件、重试、取消和清理命令。
-- 交付边界：不属于 `v1.1` MVP 阻塞验收；不得与“Cline CLI 可选降级 Driver”混为同一功能。
+- 交付边界：不属于 `v1.3` MVP 阻塞验收；不得与具体 Agent 的 CLI 降级 Driver 混为同一功能。
 
 ### FR-013：审计与脱敏
 
@@ -484,24 +489,24 @@ Driver 必须返回可持久化的外部 Session ID，并声明是否支持精�
 
 | 编号 | 状态 | 来源 | 规则 |
 |---|---|---|---|
-| BR-001 | 已决策 | 双方职责分工 | Codex 拥有任务定义和最终集成权；Cline 拥有执行层调度权；Bridge 拥有状态流转权。 |
+| BR-001 | 已决策 | 双方职责分工 | Codex 拥有任务定义和最终集成权；受管 Agent 拥有合同范围内的执行权；Bridge 拥有状态流转权。 |
 | BR-002 | 已确认 | 用户于 2026-07-19 明确确认部署形态 | MVP 采用本地、单用户、单机部署。 |
 | BR-003 | 已决策 | 用户要求独立 App 协作 | 双方只交换任务合同、事件和可验证产物，不交换完整会话和内部思考。 |
-| BR-004 | 已决策 | 防止循环编排 | 仅允许 Codex 经 Bridge 调用 Cline；Cline 不得反向调用 Codex。 |
+| BR-004 | 已决策 | 防止循环编排 | 仅允许 Codex 经 Bridge 调用受管 Agent；执行 Agent 不得反向调用 Codex。 |
 | BR-005 | 已决策 | 用户确认 OQ-004 | 同一任务版本同一时间只能有一个写入租约；冲突请求直接拒绝并返回 `LEASE_CONFLICT`，不自动排队。 |
 | BR-006 | 已决策 | 用户确认 OQ-004 | 同一文件同一时间只能有一个写入 Owner。 |
 | BR-007 | 已决策 | 用户确认 OQ-004 | 未显式声明的路径、工具和命令默认拒绝。 |
-| BR-008 | 已决策 | 用户确认 OQ-004 | Cline 自述通过不能替代 Bridge 或 CI 的实际验证结果。 |
+| BR-008 | 已决策 | 用户确认 OQ-004 | Agent 自述通过不能替代 Bridge 或 CI 的实际验证结果。 |
 | BR-009 | 已决策 | 用户确认 OQ-004 | 任务运行后当前 task version 不可变；需求变化必须创建新版本。 |
 | BR-010 | 已决策 | 最终集成职责 | MVP 不自动合并 `main`，必须由 Codex 或用户完成。 |
 | BR-011 | 已决策 | 用户确认 OQ-004 | Tester 不得修改产品代码，Reviewer 和 Coordinator 默认只读。 |
 | BR-012 | 已决策 | 用户确认 OQ-004 | 模型凭据不得写入任务、结果、本地数据库和普通日志。 |
 | BR-013 | 已决策 | 用户接受技术栈建议 | MVP 使用 Node.js 22+、TypeScript 和 pnpm monorepo。 |
 | BR-014 | 已决策 | 用户接受 Agent 扩展建议 | Bridge Core 不得直接依赖具体 Agent SDK，只依赖版本化 Driver 协议。 |
-| BR-015 | 已决策 | 用户接受 Cline 接入建议 | Cline SDK 运行在独立 Driver 子进程；Cline CLI 仅作为降级、诊断和兼容路径。 |
+| BR-015 | 已决策 | 用户确认 Driver 中立化 | 具体 Agent SDK、Server 或 CLI 只能存在于独立 Driver 边界内；主 Driver 与降级 Driver 必须通过统一选型门禁。 |
 | BR-016 | 已决策 | 用户接受接口分层建议 | Codex 通过 MCP 调用 Bridge；Bridge 内部 Worker/Driver 通信不得直接复用 Codex MCP 工具协议。 |
 | BR-017 | 已决策 | 用户接受云端演进建议 | MVP 使用本地实现，但存储、事件、Artifact 和 Worker 传输必须通过可替换接口隔离。 |
-| BR-018 | 已决策 | 用户确认 Cline Hub 模式 | 正常运行使用 `ClineCore backendMode: hub`；测试可使用 `local`；VS Code 插件为可选客户端，不是执行依赖。 |
+| BR-018 | 已决策 | 用户确认 Driver 中立化 | 正常运行不得依赖 Agent 或 IDE 的可见 UI；Bridge 持有权威事件和状态，多客户端由 Bridge 扇出而非依赖特定 Hub。 |
 | BR-019 | 已决策 | 用户确认 OQ-004 | 整个 Agent 任务失败后不自动重跑；仅 Provider 瞬时错误可在单次 run 内有限重试。 |
 | BR-020 | 已决策 | 用户确认 OQ-004 | MVP 默认 `timeout_seconds=3600`、`max_review_cycles=3`、`max_agent_count=4`；任务合同可降低限制，提升限制必须显式审批。 |
 | BR-021 | 已决策 | 用户确认会话隔离方案 | 一个 Agent Session 只能绑定一个 `task_id + task_version`；任何跨需求或跨版本复用均返回 `SESSION_SCOPE_CONFLICT`。 |
@@ -564,7 +569,7 @@ Driver 必须返回可持久化的外部 Session ID，并声明是否支持精�
     "npm test -- auth"
   ],
   "git": {
-    "branch": "cline/AUTH-123/developer"
+    "branch": "agent/AUTH-123/developer"
   },
   "relations": [
     {
@@ -800,13 +805,13 @@ bridge_mark_completed(task_id, merge_commit)
 ### 14.1 Git 隔离
 
 - 每个写入任务使用独立分支和 worktree。
-- Cline 不得直接写主工作区。
+- 受管 Agent 不得直接写主工作区。
 - 启动前记录 base commit，完成后验证实际 diff。
 - MVP 不自动合并主分支。
 
 ### 14.2 进程隔离
 
-- 每个 Agent run 使用可追踪的独立 Driver 子进程；Cline SDK session 只能存在于 Cline Driver 子进程中。
+- 每个 Agent run 使用可追踪的独立 Driver 子进程；具体 SDK、Server 连接和 Session 客户端只能存在于对应 Driver 边界中。
 - 支持超时、取消和退出码捕获。
 - Bridge 退出后不得遗留无法识别的后台任务。
 
@@ -820,7 +825,7 @@ bridge_mark_completed(task_id, merge_commit)
 ### 14.4 密钥隔离
 
 - 模型凭据通过环境或系统密钥存储注入。
-- Codex 不读取 Cline 凭据，Cline 不读取 Codex 凭据。
+- Codex 不读取执行 Agent 凭据，执行 Agent 不读取 Codex 凭据；不同 Driver 的凭据也必须隔离。
 - 日志、错误和事件输出必须脱敏。
 
 ### 14.5 上下文隔离
@@ -829,9 +834,9 @@ bridge_mark_completed(task_id, merge_commit)
 - Context Package 使用允许列表组装，不得通过“最近任务”“同一模块”或“同一项目”隐式继承历史内容。
 - Project Baseline、Handoff、Continuation Snapshot 和最终 Context Package 必须版本化并记录内容哈希。
 - Handoff 发布前执行敏感字段扫描；完整会话、模型内部思考和凭据不得进入交接包。
-- Bridge 管理的 Cline/其他 Driver Session 必须执行硬隔离；Codex GUI 无法由 Bridge 强制新开窗口时，通过新 Codex 任务操作规范和 Bridge 协议拒绝共同降低污染风险。
+- Bridge 管理的所有 Driver Session 必须执行硬隔离；Codex GUI 无法由 Bridge 强制新开窗口时，通过新 Codex 任务操作规范和 Bridge 协议拒绝共同降低污染风险。
 
-本节全部要求已决策，来源为用户确认 Cline Hub 模式、按推荐方案定稿 OQ-004，并确认会话隔离与上下文交接计划。路径规范化、符号链接逃逸防护、命令策略和上下文白名单组装作为强制安全验收项。
+本节全部要求已决策，来源为用户确认 Driver 中立化、按推荐方案定稿 OQ-004，并确认会话隔离与上下文交接计划。路径规范化、符号链接逃逸防护、命令策略和上下文白名单组装作为强制安全验收项。
 
 ## 15. 异常与边界
 
@@ -841,7 +846,7 @@ bridge_mark_completed(task_id, merge_commit)
 | 重复启动 | 根据幂等键返回既有 run |
 | 并发写入 | 直接拒绝后发写入请求并返回 `LEASE_CONFLICT`，不自动排队 |
 | base commit 过期 | 拒绝启动，要求重新基线 |
-| Cline 异常退出 | 保存事件和日志，将 run 标记失败；整个任务不自动重跑 |
+| Driver 或 Agent 异常退出 | 保存事件和日志，将 run 标记失败；整个任务不自动重跑 |
 | 验收失败 | 不进入待合并状态，返回验证结果 |
 | 越权文件修改 | 任务失败，报告越权路径 |
 | 用户取消 | 终止执行，保留已有产物 |
@@ -900,25 +905,25 @@ bridge_mark_completed(task_id, merge_commit)
 | 系统 | 输入/输出 | 权威来源 | 候选接口 | 失败补偿 |
 |---|---|---|---|---|
 | Codex | 任务版本、关系、Handoff 选择、反馈、完成确认 | Codex 用户和任务合同 | MCP stdio | 保留任务、Context Package 和审计事件；新 Codex 任务可重新加载 |
-| Cline | Session、上下文用量、执行事件、commit、结果 | Cline run 与 Hub Session | 独立 Driver 子进程中的 SDK；CLI 降级 | 检查点滚动、终止、切换降级路径；失败任务仅允许人工触发新 run |
+| 受管 Code Agent | Session、上下文用量、执行事件、commit、结果 | Bridge run、Session Binding 与事件日志 | 选型通过的独立 Driver；显式降级 Driver | 检查点滚动、终止、切换降级路径；失败任务仅允许人工触发新 run |
 | Git | base commit、branch、diff | Git 仓库 | Git CLI | 拒绝过期基线或冲突任务 |
 | CI/验证器 | 测试和检查结果 | CI 或 Bridge 进程 | 命令接口 | 保存失败日志，不放行 |
-| 模型提供商 | 模型响应和用量 | Provider API | Cline Provider 配置 | 限流重试或失败 |
+| 模型提供商 | 模型响应和用量 | Provider API | 选定 Driver 的 Provider 配置 | 限流重试或失败 |
 
 ## 18. 用户故事与验收标准
 
 ### US-001：创建并执行任务
 
 - 状态：已决策
-- 来源：用户要求 Codex 与 Cline 通过 Bridge 协作。
+- 来源：用户要求 Codex 与 Code Agent 通过 Bridge 协作。
 
-> 作为使用 Codex 的开发者，我希望 Codex 能向 Bridge 提交结构化任务并由 Cline 执行，从而无需手工复制完整上下文。
+> 作为使用 Codex 的开发者，我希望 Codex 能向 Bridge 提交结构化任务并由受管 Agent 执行，从而无需手工复制完整上下文。
 
 ```gherkin
 场景：合法任务正常执行
 假如任务合同合法且 Git 基线可用
 当 Codex 启动任务
-那么 Bridge 创建隔离工作区并启动 Cline
+那么 Bridge 创建隔离工作区并通过选定 Driver 启动执行 Agent
 并且保存运行事件、commit 和验证结果
 并且任务进入待 Codex 审查状态
 ```
@@ -931,7 +936,7 @@ bridge_mark_completed(task_id, merge_commit)
 ```gherkin
 场景：Agent 修改禁止目录
 假如任务只允许写入 src/auth
-当 Cline 修改 infra 目录
+当执行 Agent 修改 infra 目录
 那么 Bridge 检测并报告越权路径
 并且任务不得进入待合并状态
 ```
@@ -942,7 +947,7 @@ bridge_mark_completed(task_id, merge_commit)
 - 来源：用户于 2026-07-19 确认 OQ-004 的独立验证规则。
 
 ```gherkin
-场景：Cline 声称测试通过但实际失败
+场景：Agent 声称测试通过但实际失败
 假如任务合同包含可执行验收命令
 当 Bridge 独立运行命令并获得非零退出码
 那么任务不得标记为成功
@@ -952,14 +957,14 @@ bridge_mark_completed(task_id, merge_commit)
 ### US-004：结构化返工
 
 - 状态：已决策
-- 来源：Codex 最终审查、Cline 执行的职责分工。
+- 来源：Codex 最终审查、受管 Agent 执行的职责分工。
 
 ```gherkin
 场景：Codex 要求修改
-假如 Cline 已提交可审查 commit
+假如执行 Agent 已提交可审查 commit
 当 Codex 提交结构化 finding
 那么 Bridge 将 finding 关联到当前任务版本和 commit
-并且 Cline 在隔离分支继续修改
+并且执行 Agent 在隔离分支继续修改
 并且新结果重新执行完整验证
 ```
 
@@ -970,7 +975,7 @@ bridge_mark_completed(task_id, merge_commit)
 
 ```gherkin
 场景：取消运行中任务
-假如 Cline 正在执行
+假如执行 Agent 正在执行
 当用户或 Codex 请求取消
 那么 Bridge 终止对应执行
 并且保留审计事件和已有产物
@@ -986,28 +991,26 @@ bridge_mark_completed(task_id, merge_commit)
 并且用户可以选择恢复、重试或取消
 ```
 
-### US-006：Cline Hub 多客户端运行
+### US-006：Driver 无 UI 运行与事件观察
 
 - 状态：已决策
-- 来源：用户于 2026-07-19 明确确认 Cline Hub 运行模式。
+- 来源：用户于 2026-07-19 确认 Driver 中立化和 Bridge 权威事件边界。
 
 ```gherkin
-场景：VS Code 插件附着 Bridge 创建的 Session
-假如 Bridge 通过 ClineCore 的 hub backend 创建运行中 Session
-并且 VS Code Cline 插件连接同一兼容 Hub
-当插件附着该 Session
-那么插件能够接收 Session 事件并使用其已声明的观察、审批和 IDE 能力
-并且 Bridge 继续持有任务状态和完成判断权
+场景：Agent UI 或 IDE 未运行
+假如 Bridge 已通过选定 Driver 创建运行中 Session
+并且没有打开该 Agent 的 UI 或 IDE 插件
+当执行 Agent 处理任务
+那么任务能够继续运行
+并且 Bridge 持久化结构化事件、权限决策和完成状态
 ```
 
 ```gherkin
-场景：可选客户端或 CLI 缺失
-假如 VS Code Cline 插件未安装或退出
-并且 Cline CLI 未安装
-当 Bridge 通过 SDK/Hub 主路径执行任务
-那么任务能够继续运行
-并且健康检查报告 VS Code 客户端未连接及 CLI 降级路径不可用
-但不得将主路径判定为失败
+场景：多个观察端订阅同一任务
+假如 Bridge 已保存某个 run 的权威事件流
+当两个观察端订阅该 run
+那么 Bridge 向两者提供一致的已持久化事件和后续事件
+并且任何观察端退出都不影响 Driver 任务生命周期
 ```
 
 ### US-007：需求级会话隔离与结构化交接
@@ -1081,11 +1084,12 @@ bridge_mark_completed(task_id, merge_commit)
 - 路径匹配、路径穿越和符号链接逃逸。
 - 命令允许、审批和禁止策略。
 - Git diff 越权检测。
-- Cline Adapter 假实现集成测试。
-- ClineCore `hub` 正常运行与 `local` 测试模式验证。
-- 使用假 Hub 客户端验证多客户端附着、事件扇出和客户端断开后任务继续运行。
-- VS Code Cline 插件附着真实 Hub Session 的人工冒烟测试。
-- Cline CLI 未安装时 SDK/Hub 主路径继续运行的测试。
+- Fake Driver 集成测试和正式 Driver Contract 测试。
+- OpenCode 主 Driver 的 Headless 启动、健康检查、Session、事件、取消、权限、恢复和结果收集兼容性测试。
+- Claude Agent SDK 降级 Driver 的能力声明、独立启动、写入降级和只读复核兼容性测试。
+- Bridge 权威事件持久化、多个观察端扇出和观察端断开后任务继续运行测试。
+- Agent UI、IDE 插件和降级 Driver 缺失时主 Driver 继续运行的测试。
+- 主 Driver 不可用时显式切换降级 Driver 的能力检查和审计测试；不得静默切换正在运行的任务。
 - Session 到 TaskVersion 的单一作用域绑定，以及一个 TaskVersion 多次合法滚动的关系校验。
 - 新 Task、新 TaskVersion、同版本返工和手工重跑的 Session 选择矩阵测试。
 - 上下文使用比例达到、低于和超过 70% 的滚动边界测试。
@@ -1115,8 +1119,8 @@ agent-bridge/
 │   ├── core/                    # 任务、状态机、关系、上下文策略和调度
 │   ├── schemas/                 # JSON Schema 与协议版本
 │   ├── driver-protocol/         # Agent Driver 生命周期协议
-│   ├── driver-cline-sdk/        # 独立子进程，内部使用 @cline/sdk
-│   ├── driver-generic-cli/      # Cline CLI 与其他 CLI Agent 适配
+│   ├── driver-opencode/         # OpenCode 主 Driver
+│   ├── driver-claude-agent/     # Claude Agent SDK 降级 Driver
 │   ├── worker-runtime/          # worktree、进程、超时、取消和隔离
 │   ├── storage-sqlite/          # SQLite Repository 与 Outbox
 │   ├── artifacts-local/         # 本地 Artifact Repository
@@ -1157,8 +1161,10 @@ agent-bridge/
 ### Phase 2：本地执行 Harness
 
 - Agent Driver 协议。
-- Cline SDK Driver 子进程。
-- Cline CLI 降级 Driver。
+- OpenCode `1.18.3` 主 Driver 子进程。
+- Claude Agent SDK `0.3.215` / Claude Code `2.1.215` 降级 Driver 子进程。
+- 两个 Driver 的能力声明、统一事件映射和 Contract 测试。
+- Driver 级显式降级；不把共用 DeepSeek 描述为 Provider 级灾备。
 - 进程和 session 管理。
 - 上下文用量采集/估算、检查点生成和 Session 滚动。
 - Handoff 生成、完整性校验、陈旧依赖检查和 Context Package 组装。
@@ -1187,7 +1193,8 @@ agent-bridge/
 
 | 类型 | 内容 | 影响 | 状态 | 验证方式 |
 |---|---|---|---|---|
-| 技术 | Cline SDK 事件和取消粒度可能不足 | 影响 Adapter 设计 | 待验证 | Spike 验证 SDK；保留 CLI 降级方案 |
+| 技术 | 候选 Agent 的 Session、事件、取消或权限能力可能不足 | 影响 Driver 选择和适配设计 | 已验证 | OpenCode 与 Claude Agent SDK 已通过 A 层、B-simulated 和 B-real 适用硬门禁；正式实现继续运行 Contract 测试 |
+| 可用性 | OpenCode 与 Claude Agent SDK 共用 DeepSeek Provider 故障域 | Provider 故障时主/降级 Driver 可能同时不可用 | 已接受缺口 | MVP 明确仅提供 Driver 级降级；后续通过 Driver Protocol 接入独立 Provider 灾备 |
 | 技术 | Codex MCP 与本地 Bridge 的进程生命周期需验证 | 影响启动和恢复 | 待验证 | 最小 MCP PoC |
 | 安全 | 路径规则可能被符号链接绕过 | 产生越权写入 | 已识别 | 规范化路径并做逃逸测试 |
 | 一致性 | 多 Agent 可能争用同一文件 | 产生冲突和覆盖 | 已识别 | 路径 Owner、租约和 diff 校验 |
@@ -1202,18 +1209,22 @@ agent-bridge/
 
 | 日期 | 决策 | 来源 | 影响 |
 |---|---|---|---|
-| 2026-07-19 | 开发独立 Agent Bridge 连接 Codex 与 Cline | 用户明确要求 | 建立中立协作控制层 |
-| 2026-07-19 | Codex 负责项目级协调和最终集成，Cline 负责执行团队 | 用户接受前序设计 | 禁止双 Coordinator 平级竞争 |
+| 2026-07-19 | 开发独立 Agent Bridge 连接 Codex 与 Code Agent | 用户明确要求并确认中立化调整 | 建立中立协作控制层 |
+| 2026-07-19 | Codex 负责项目级协调和最终集成，受管 Agent 负责合同范围内执行 | 用户接受前序设计并确认中立化调整 | 禁止双 Coordinator 平级竞争 |
 | 2026-07-19 | MVP 采用本地、单用户、单机部署 | 用户明确确认 | 不开发账号、多租户和远程 Worker |
 | 2026-07-19 | 不共享完整会话，只交换合同、事件和产物 | 前序方案被用户接受 | 降低上下文污染和敏感数据暴露 |
-| 2026-07-19 | 使用 Node.js 22+、TypeScript 和 pnpm monorepo | 用户接受技术栈建议 | 直接接入 Cline SDK，并通过包边界保留云端演进能力 |
+| 2026-07-19 | 使用 Node.js 22+、TypeScript 和 pnpm monorepo | 用户接受技术栈建议 | 通过独立 Driver 包边界接入候选并保留云端演进能力 |
 | 2026-07-19 | Bridge Core 仅依赖 Agent Driver 协议 | 用户接受任意 Agent 扩展建议 | 新 Agent 通过 Driver 接入，不修改领域核心 |
-| 2026-07-19 | Cline SDK 在独立 Driver 子进程中运行，CLI 作为降级路径 | 用户接受 Cline 接入建议 | 同时获得 SDK 控制粒度和进程隔离能力 |
+| 2026-07-19 | 具体 Agent SDK、Server 或 CLI 只存在于独立 Driver 子进程 | 用户确认 Driver 中立化 | 保持协议控制和进程隔离，不让供应商 SDK 泄漏到 Core |
 | 2026-07-19 | Codex 使用 MCP stdio 调用 Bridge，内部 Worker 使用独立 Driver 协议 | 用户接受接口分层建议 | 避免将 MCP 强行作为调度和远程 Worker 协议 |
 | 2026-07-19 | 本地 SQLite/Outbox/文件 Artifact 通过接口抽象 | 用户接受云端演进建议 | 后续可替换为 PostgreSQL、消息系统和对象存储 |
-| 2026-07-19 | 正常运行使用 Cline Hub，测试使用 local backend，VS Code 插件作为可选客户端 | 用户明确确认 Cline Hub 运行模式 | 支持 Session 持久化、多客户端观察和人工接管，同时不依赖 IDE 插件执行任务 |
+| 2026-07-19 | 主 Driver 与降级 Driver 通过统一 Spike 门禁选定，Bridge 提供权威事件扇出 | 用户确认调整边界 | 移除 Cline Hub 和 IDE 插件硬依赖，保持产品语义供应商中立 |
 | 2026-07-19 | 按推荐方案定稿 OQ-004 全部规则 | 用户明确确认 | 权限、租约、版本、独立验证、状态机、失败恢复和默认限制具备确定行为 |
 | 2026-07-19 | 新需求强制独立 Session，同需求允许续接或滚动，相关需求仅通过版本化 Handoff 传递上下文 | 用户确认本次 PRD 更新计划 | 将上下文隔离从操作习惯升级为 Bridge 强制规则，并保留任务间必要知识 |
+| 2026-07-19 | Cline SDK/Hub `0.0.65` 保留为历史阻塞候选，不再作为 MVP 唯一主路径 | Cline Spike 结果和用户确认调整边界 | 选型必须依据运行时 Contract 证据，不依据产品名称或官方说明 |
+| 2026-07-22 | OpenCode `1.18.3` 选为 MVP 主 Driver，Claude Agent SDK `0.3.215` / Claude Code `2.1.215` 选为 MVP 降级 Driver | A 层、B-simulated、B-real 证据及用户确认 | OQ-002 关闭，正式 Driver Contract 与实现解除阻塞 |
+| 2026-07-22 | Codex App 保持用户交互、规划、授权和最终审查入口；Codex SDK B 层延期 | B 层候选范围与用户确认 | 保留 Codex SDK A 层证据，不把延期解释为失败 |
+| 2026-07-22 | OpenCode 与 Claude Agent SDK 共用 DeepSeek，仅提供 Driver 级降级 | Provider 预检、B-real 证据及用户风险接受 | Provider 级灾备作为后续能力，不纳入 MVP 已承诺范围 |
 
 ## 24. 开放问题
 
@@ -1224,12 +1235,13 @@ agent-bridge/
 - 来源：用户于 2026-07-19 接受技术栈建议。
 - 影响：使用 TypeScript 领域核心、MCP Server、Driver 子进程和 JSON Schema 工具链。
 
-### OQ-002：Cline 接入方式（已关闭）
+### OQ-002：Agent Driver 接入方式（已关闭）
 
 - 状态：已决策
-- 决策：Cline SDK 为主，运行在独立 Driver 子进程；正常运行连接 Cline Hub，测试使用 local backend；VS Code 插件为可选客户端；Cline CLI 为可选降级、诊断和兼容路径。
-- 来源：用户于 2026-07-19 接受 Cline 接入建议。
-- 实施前验证：技术 Spike 验证 SDK 的启动、事件、角色/模型配置、取消、Session 恢复、快照、上下文用量、后继 Session 和结果收集能力；验证失败时不得推翻 Driver 边界，应由本地估算、持久化检查点或 CLI/Generic Driver 补偿。
+- 决策：OpenCode `1.18.3` 为 MVP 主 Driver；Claude Agent SDK `0.3.215` / Claude Code `2.1.215` 为 MVP 降级 Driver；具体 SDK、Server 或 CLI 运行在独立 Driver 子进程；Bridge Core 只依赖 Driver Protocol；Agent UI 和 IDE 插件不是执行依赖；Bridge 提供权威事件扇出。
+- 边界：Codex App 是用户交互、规划、授权和最终审查入口；Codex SDK 保留 A 层通过证据但本轮 B 层延期。两个正式 Driver 共用 DeepSeek，只提供 Driver 级降级，不构成 Provider 级灾备。
+- 来源：Cline Spike、Agent Driver A 层/B-simulated/B-real 结果，以及用户于 2026-07-22 对最终选型和不重复付费运行的确认。
+- 持续验证：默认 CI 使用 Fake Driver、Contract 测试和无凭据兼容性测试；真实 Provider 测试必须逐次单独授权。硬门禁失败不得通过评分或 Prompt 约定补偿。
 
 ### OQ-003：GitHub 是否作为 MVP 强依赖
 
@@ -1242,7 +1254,7 @@ agent-bridge/
 
 - 状态：已决策
 - 决策：按本文 BR-005 至 BR-009、BR-011 至 BR-012、BR-019 至 BR-020、状态机、第 14 至 16 节以及 US-003、US-005 定稿。
-- 来源：用户于 2026-07-19 明确回复“确认 Cline Hub 运行模式，并按推荐方案定稿 OQ-004 全部规则”。
+- 来源：用户于 2026-07-19 确认 OQ-004 全部规则；后续 Driver 中立化不改变这些产品行为。
 - 影响：研发不得自行改变默认拒绝、租约冲突、任务版本、独立验证、角色隔离、凭据保护、状态转换和失败恢复行为。
 
 ### OQ-005：需求会话隔离与上下文交接（已关闭）
@@ -1262,17 +1274,17 @@ agent-bridge/
 - [x] 正常、失败、取消、返工和恢复路径已覆盖。
 - [x] 验收场景可以转化为自动化测试。
 - [x] 技术栈已确认。
-- [x] Cline 接入主路径已确认。
+- [x] 主 Driver 与降级 Driver 已通过统一 Spike 并确认。
 - [x] 任意 Agent 扩展、跨机和云端演进边界已确认。
 - [x] 权限、状态和失败策略已确认并转为已决策。
-- [x] 所有阻塞研发的开放问题已关闭。
-- [x] Cline Hub、local 测试模式、VS Code 可选客户端和 CLI 可选降级边界已确认。
+- [x] 所有阻塞正式 Driver 实现的开放问题已关闭。
+- [x] Agent UI/IDE 非执行依赖、Bridge 权威事件扇出和独立 Driver 边界已确认。
 - [x] 新需求、同需求返工、新 TaskVersion 和手工重跑的 Session 选择规则已确认。
 - [x] 上下文检查点、70% 滚动阈值和降级恢复路径已确认。
 - [x] Project Baseline、Context Package、Handoff、任务关系和陈旧依赖规则已确认。
 - [x] 核心流程、权限、状态、规则、数据契约、异常和验收行为可追溯。
 
-当前结论：所有阻塞研发的产品和技术决策已经关闭，PRD 更新为 `v1.1 / 研发就绪`基线。OQ-003 与 FR-012 为非阻塞后续项，不影响完整 MVP 启动。
+当前结论：PRD 更新为 `v1.3 / 研发就绪`基线。领域内核、Schema、状态机、隔离、存储、MCP 边界和正式 Agent Driver 均可继续研发；OQ-002 已关闭。OQ-003 与 FR-012 仍为非阻塞后续项。
 
 ## 26. 新研发任务启动指令
 
@@ -1280,12 +1292,12 @@ agent-bridge/
 
 1. 检查目标工作区、Git 状态和已有技术栈。
 2. 使用已确认的 Node.js 22+、TypeScript 和 pnpm monorepo，不重新选择主技术栈。
-3. 保持 Bridge Core、Driver Protocol、Cline SDK Driver、Generic CLI Driver、Worker Runtime 和 Storage 的依赖边界。
-4. 正常运行使用 Cline Hub，测试使用 local backend；VS Code 插件是可选客户端，Cline CLI 是可选降级和诊断依赖。
-5. 先完成 Cline SDK/Hub 最小可行性 Spike，验证启动、事件、角色/模型配置、取消、快照、结果收集、VS Code Session 附着、Session 创建/恢复及上下文用量采集能力。
+3. 保持 Bridge Core、Driver Protocol、OpenCode Driver、Claude Agent Driver、Worker Runtime 和 Storage 的依赖边界。
+4. 正常运行不得依赖 Agent UI 或 IDE；Bridge 负责权威状态、事件持久化和观察端扇出。
+5. 使用已经通过统一选型 Spike 的 OpenCode 主 Driver 和 Claude Agent SDK 降级 Driver；未经逐次单独授权不得执行真实 Provider 测试。
 6. 在领域内核先实现 TaskVersion、TaskRelation、AgentSessionBinding、ContextPackage、HandoffPackage 和 ContinuationSnapshot，不允许把这些约束只写进 Prompt。
 7. 新需求和新 TaskVersion 必须创建新 Session；同版本返工可续接；达到 70% 阈值必须在安全边界滚动；任何跨版本复用必须返回稳定错误码。
 8. 输出实施计划、依赖清单、数据存储方案、协议版本方案、Context Package 组装策略和文件变更范围。
-9. 获得用户确认后开始正式编码；不得重新开放已关闭的产品决策，除非 Spike 证明当前方案技术上不可行。
+9. 正式 Driver 编码从固化 Driver Contract、能力声明、事件映射和 Contract 测试开始；不得让具体 Provider SDK 泄漏到 Bridge Core。不得重新开放已关闭的产品决策，除非新的兼容性证据证明当前方案技术上不可行。
 10. 不得提交模型凭据、本地数据库、Agent 运行记录、临时 worktree、本地 Agent 规则和过程规划文件。
 11. 完成后必须运行单元测试、集成测试和临时 Git 仓库端到端测试，并逐项报告用户故事和业务规则的验证结果。
