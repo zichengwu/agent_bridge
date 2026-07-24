@@ -79,6 +79,7 @@ export function buildClaudeAgentQueryOptions(input: {
   readonly abortController: AbortController;
   readonly canUseTool: NonNullable<Options["canUseTool"]>;
 }): Options {
+  const tools = [...(input.security?.tools ?? [])];
   return {
     abortController: input.abortController,
     cwd: input.workDirectory,
@@ -86,9 +87,14 @@ export function buildClaudeAgentQueryOptions(input: {
     maxTurns: input.security?.maxTurns ?? 8,
     maxBudgetUsd: input.security?.maxBudgetUsd,
     model: input.environment.ANTHROPIC_MODEL,
-    tools: [...(input.security?.tools ?? [])],
+    tools,
     allowedTools: [],
     disallowedTools: [...CLAUDE_AGENT_DISALLOWED_TOOLS],
+    settings: {
+      permissions: {
+        ask: tools,
+      },
+    },
     agents: {},
     mcpServers: {},
     plugins: [],

@@ -4,7 +4,7 @@ Agent Bridge 是运行在开发者本机的单用户、单机协作控制层，�
 
 当前仓库已完成 MVP 工程初始化、Cline 技术 Spike 和 Agent Driver 选型。产品行为以 `docs/prd/agent-bridge-prd.md` 为基线；Bridge Core 只依赖版本化 Driver Protocol，不依赖具体 Agent SDK。
 
-Phase 2 第一开发切片、切片 2A、2B 和 2C 已经完成：`packages/driver-protocol` 提供版本为 `1.0` 的供应商无关 Driver Contract、统一事件类型和运行时断言；`packages/driver-opencode` 已实现 OpenCode `1.18.3` 主 Driver，并通过 Fake Runtime Contract、完全无 Provider 的 Headless 控制面兼容性测试，以及使用 loopback 确定性模拟 Provider 的正式 B-simulated 安全回归；`packages/driver-claude-agent` 已实现 Claude Agent SDK `0.3.215` / Claude Code `2.1.215` 降级 Driver、隔离配置和 Fake Runtime Contract。Claude 正式 B-simulated 回归属于后续切片。
+Phase 2 第一开发切片、切片 2A、2B、2C 和 2D 已经完成：`packages/driver-protocol` 提供版本为 `1.0` 的供应商无关 Driver Contract、统一事件类型和运行时断言；`packages/driver-opencode` 已实现 OpenCode `1.18.3` 主 Driver，并通过 Fake Runtime Contract、完全无 Provider 的 Headless 控制面兼容性测试，以及使用 loopback 确定性模拟 Provider 的正式 B-simulated 安全回归；`packages/driver-claude-agent` 已实现 Claude Agent SDK `0.3.215` / Claude Code `2.1.215` 降级 Driver、隔离配置、Fake Runtime Contract 和正式 B-simulated 安全回归。
 
 ## 环境要求
 
@@ -28,7 +28,13 @@ OpenCode 正式 B-simulated 回归可单独运行：
 pnpm test:driver-opencode:b-simulated
 ```
 
-该回归使用临时隔离环境、一次性 Git worktree、合成 Token 和仅监听 `127.0.0.1` 的模拟 Provider；`realProviderRequests=0`。它用于证明正式 Driver 的本地兼容性与安全边界，不等同于真实 Provider 验证。
+Claude Agent 正式 B-simulated 回归可单独运行：
+
+```bash
+pnpm test:driver-claude-agent:b-simulated
+```
+
+这些回归使用临时隔离环境、一次性 Git worktree、合成 Token 和仅监听 `127.0.0.1` 的模拟 Provider；`realProviderRequests=0`。它们用于证明正式 Driver 的本地兼容性与安全边界，不等同于真实 Provider 验证。
 
 ## Agent Driver 选型状态
 

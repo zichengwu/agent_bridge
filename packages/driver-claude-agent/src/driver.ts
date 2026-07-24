@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { dirname } from "node:path";
 
 import {
   DRIVER_PROTOCOL_VERSION,
@@ -675,6 +676,7 @@ export function createClaudeAgentDriver(
   });
   const privatePaths = [
     options.workDirectory,
+    dirname(options.workDirectory),
     options.isolation.homeDirectory,
     options.isolation.tempDirectory,
     options.isolation.configDirectory,

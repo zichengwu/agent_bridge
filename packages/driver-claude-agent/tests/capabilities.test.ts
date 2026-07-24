@@ -78,9 +78,39 @@ describe("Claude Agent Driver 能力和安全配置", () => {
     expect(options.tools).toEqual([]);
     expect(options.allowedTools).toEqual([]);
     expect(options.disallowedTools).toEqual([...CLAUDE_AGENT_DISALLOWED_TOOLS]);
+    expect(options.settings).toEqual({
+      permissions: {
+        ask: [],
+      },
+    });
     expect(options.promptSuggestions).toBe(false);
     expect(options.agentProgressSummaries).toBe(false);
     expect(options.persistSession).toBe(true);
+  });
+
+  it("显式启用的工具全部进入 canUseTool 审批边界", () => {
+    const environment = buildClaudeAgentEnvironment({ isolation });
+    const options = buildClaudeAgentQueryOptions({
+      environment,
+      workDirectory: "/isolated/worktree",
+      security: {
+        tools: ["Read", "Write"],
+      },
+      abortController: new AbortController(),
+      canUseTool: () =>
+        Promise.resolve({
+          behavior: "deny",
+          message: "fixture",
+        }),
+    });
+
+    expect(options.tools).toEqual(["Read", "Write"]);
+    expect(options.allowedTools).toEqual([]);
+    expect(options.settings).toEqual({
+      permissions: {
+        ask: ["Read", "Write"],
+      },
+    });
   });
 
   it("显式 Claude Code 组件缺失时无 Provider 地返回 degraded", async () => {
