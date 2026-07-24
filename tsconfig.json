@@ -5,6 +5,7 @@
     { "path": "apps/bridge-mcp" },
     { "path": "packages/artifacts-local" },
     { "path": "packages/core" },
+    { "path": "packages/driver-claude-agent" },
     { "path": "packages/driver-cline-sdk" },
     { "path": "packages/driver-generic-cli" },
     { "path": "packages/driver-opencode" },
