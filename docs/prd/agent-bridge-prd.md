@@ -330,7 +330,7 @@ Driver 必须返回可持久化的外部 Session ID，并声明是否支持精�
 
 1. Codex 或用户判断输入属于同一 `TaskVersion` 的实现返工、新 `TaskVersion`，还是新的 `Task`。
 2. Bridge 对新 `Task` 或新 `TaskVersion` 强制创建新的 Agent Session；不得把旧 Session 重新绑定到新需求。
-3. Coordinator 为相关任务声明 `depends_on`、`related_to`、`supersedes`、`derived_from` 或 `blocks` 关系，并显式选择允许注入的 Handoff。
+3. Coordinator 为相关任务声明 `depends_on`、`related_to`、`supersedes` 或 `follow_up_of` 关系，并显式选择允许注入的 Handoff。
 4. Bridge 组装 `ProjectBaseline + 当前 TaskContract + 已选 Handoff`，创建可审计的 Context Package 后启动新 Session。
 5. 同一 `TaskVersion` 的测试修复和 Review 返工可续用当前 Session；目标、范围、业务规则或验收标准变化时必须创建新版本和新 Session。
 6. Bridge 不因任务位于同一项目或修改同一模块而自动复用 Session，也不自动注入所有历史任务。
@@ -515,7 +515,7 @@ Driver 必须返回可持久化的外部 Session ID，并声明是否支持精�
 | BR-024 | 已决策 | 用户确认上下文滚动方案 | 默认滚动阈值为上下文窗口的 70%；有效阈值取 TaskContract、Project、Driver 配置与 70% 上限中的最小值。达到阈值时，在安全边界生成 `ContinuationSnapshot` 并滚动到同一 run 下的新 Session。 |
 | BR-025 | 已决策 | 用户确认结构化交接方案 | 不同需求之间只通过版本化 Context Package 传递信息，禁止默认复制完整聊天记录、模型内部思考或全部历史 Handoff。 |
 | BR-026 | 已决策 | 用户确认结构化交接方案 | 新任务 Context Package 仅由当前 Project Baseline、TaskContract 和显式选择的 Handoff 组成；同一任务滚动时额外加入最新 Continuation Snapshot。 |
-| BR-027 | 已决策 | 用户确认任务关系方案 | 任务关系仅支持 `depends_on`、`related_to`、`supersedes`、`derived_from` 和 `blocks`；关系必须关联具体 TaskVersion。 |
+| BR-027 | 已决策 | 用户确认任务关系方案 | 任务关系仅支持 `depends_on`、`related_to`、`supersedes` 和 `follow_up_of`；关系必须关联具体 TaskVersion。 |
 | BR-028 | 已决策 | 用户确认结构化交接方案 | Handoff 一经发布不可原地修改，必须包含来源任务版本、来源 commit、验证摘要和内容哈希；修正时发布新版本。 |
 | BR-029 | 已决策 | 用户确认结构化交接方案 | `depends_on` 的来源 commit 未包含在目标任务 base commit 中时拒绝启动并返回 `STALE_HANDOFF`；`related_to` 不满足时警告但不阻塞。 |
 | BR-030 | 已决策 | 用户确认权威边界方案 | UI 窗口不是 Session 隔离权威来源；Bridge 中的任务版本、运行、Session 绑定和审计记录为权威来源。 |
