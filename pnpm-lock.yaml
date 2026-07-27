@@ -43,7 +43,11 @@ importers:
 
   packages/artifacts-local: {}
 
-  packages/core: {}
+  packages/core:
+    dependencies:
+      '@agent-bridge/schemas':
+        specifier: workspace:*
+        version: link:../schemas
 
   packages/driver-claude-agent:
     dependencies:
