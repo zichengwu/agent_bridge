@@ -19,6 +19,12 @@ export const CORE_DOMAIN_ERROR_CODES = [
   "ROLLOVER_UNSAFE_BOUNDARY",
   "ROLLOVER_PLAN_INVALID",
   "ROLLOVER_FAILED",
+  "AUDIT_ENVELOPE_INVALID",
+  "DOMAIN_EVENT_INVALID",
+  "REPOSITORY_WRITE_INVALID",
+  "REPOSITORY_WRITE_CONFLICT",
+  "REPOSITORY_IDEMPOTENCY_CONFLICT",
+  "REPOSITORY_QUERY_INVALID",
 ] as const;
 
 export type CoreDomainErrorCode = (typeof CORE_DOMAIN_ERROR_CODES)[number];
@@ -43,6 +49,12 @@ const ERROR_MESSAGES = {
   ROLLOVER_UNSAFE_BOUNDARY: "Session rollover requires a safe boundary",
   ROLLOVER_PLAN_INVALID: "Session rollover plan is invalid",
   ROLLOVER_FAILED: "Session rollover failed",
+  AUDIT_ENVELOPE_INVALID: "Audit envelope is invalid",
+  DOMAIN_EVENT_INVALID: "Authoritative domain event is invalid",
+  REPOSITORY_WRITE_INVALID: "Repository write request is invalid",
+  REPOSITORY_WRITE_CONFLICT: "Repository write conflicts with authoritative state",
+  REPOSITORY_IDEMPOTENCY_CONFLICT: "Repository idempotency key conflicts with an earlier request",
+  REPOSITORY_QUERY_INVALID: "Repository query is invalid",
 } as const satisfies Readonly<Record<CoreDomainErrorCode, string>>;
 
 export class CoreDomainError extends Error {
