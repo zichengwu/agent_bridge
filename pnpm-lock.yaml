@@ -90,7 +90,17 @@ importers:
 
   packages/storage-sqlite: {}
 
-  packages/worker-runtime: {}
+  packages/worker-runtime:
+    dependencies:
+      '@agent-bridge/core':
+        specifier: workspace:*
+        version: link:../core
+      '@agent-bridge/driver-protocol':
+        specifier: workspace:*
+        version: link:../driver-protocol
+      '@agent-bridge/schemas':
+        specifier: workspace:*
+        version: link:../schemas
 
   spikes/driver-selection:
     dependencies:
