@@ -1,6 +1,7 @@
 export * from "./capabilities.js";
 export * from "./driver.js";
 export * from "./errors.js";
+export * from "./worker-config.js";
 export {
   OpenCodeSdkRuntime,
   type OpenCodeRuntime,

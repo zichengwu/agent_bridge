@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "agent-bridge-driver-claude-agent": "./bin/agent-bridge-driver-claude-agent.js"
+  },
   "exports": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "dependencies": {

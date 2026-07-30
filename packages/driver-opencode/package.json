@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "agent-bridge-driver-opencode": "./bin/agent-bridge-driver-opencode.js"
+  },
   "exports": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "dependencies": {
