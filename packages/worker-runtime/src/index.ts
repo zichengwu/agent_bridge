@@ -1,4 +1,6 @@
 export * from "./command-policy.js";
+export * from "./context-handoff-runtime.js";
+export * from "./driver-selection.js";
 export * from "./errors.js";
 export * from "./git-client.js";
 export * from "./git-worktree-manager.js";
@@ -8,4 +10,7 @@ export * from "./permission-policy.js";
 export * from "./process-supervisor.js";
 export * from "./recovery-policy.js";
 export * from "./role-templates.js";
+export * from "./run-orchestrator.js";
+export * from "./runtime-config.js";
 export * from "./stdio-driver-client.js";
+export * from "./verification-runner.js";

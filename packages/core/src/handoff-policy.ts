@@ -1,4 +1,5 @@
 import {
+  DOMAIN_SCHEMA_VERSION,
   parseHandoffPackage,
   parseTaskRelation,
   parseTaskVersion,
@@ -8,7 +9,11 @@ import {
   type TaskVersion,
 } from "@agent-bridge/schemas";
 
-import { hasValidDocumentContentHash, scanSensitiveContent } from "./content-integrity.js";
+import {
+  computeContentHash,
+  hasValidDocumentContentHash,
+  scanSensitiveContent,
+} from "./content-integrity.js";
 import { CoreDomainError } from "./errors.js";
 
 const FIELD_SOURCE_VALUES = ["bridge", "git", "verification", "agent", "human"] as const;
@@ -59,6 +64,68 @@ export interface ValidatedHandoff {
 export interface HandoffSelectionResult {
   readonly handoffs: readonly ValidatedHandoff[];
   readonly warnings: readonly HandoffPolicyWarning[];
+}
+
+export interface HandoffGenerationInput {
+  readonly handoff_id: string;
+  readonly handoff_version: number;
+  readonly source_task: HandoffPackage["source_task"];
+  readonly code_state: HandoffPackage["code_state"];
+  readonly completed: readonly string[];
+  readonly decisions: readonly string[];
+  readonly contracts: readonly string[];
+  readonly changed_files: readonly string[];
+  readonly verification: HandoffPackage["verification"];
+  readonly known_issues: readonly string[];
+  readonly downstream_notes: readonly string[];
+  readonly field_sources: HandoffFieldSources;
+  readonly generated_at: string;
+  readonly metadata?: HandoffPackage["metadata"];
+}
+
+export function generateHandoffPackage(input: HandoffGenerationInput): HandoffPackage {
+  if (input.field_sources.decisions === "agent" || input.field_sources.contracts === "agent") {
+    throw handoffIntegrityError("AUTHORITATIVE_FIELD_SOURCE_INVALID");
+  }
+
+  const withoutHash = {
+    schema_version: DOMAIN_SCHEMA_VERSION,
+    handoff_id: input.handoff_id,
+    handoff_version: input.handoff_version,
+    source_task: { ...input.source_task },
+    code_state: { ...input.code_state },
+    completed: sorted(input.completed),
+    decisions: sorted(input.decisions),
+    contracts: sorted(input.contracts),
+    changed_files: sorted(input.changed_files),
+    verification: {
+      status: input.verification.status,
+      artifact_ids: sorted(input.verification.artifact_ids),
+    },
+    known_issues: sorted(input.known_issues),
+    downstream_notes: sorted(input.downstream_notes),
+    field_sources: { ...input.field_sources },
+    generated_at: input.generated_at,
+    ...(input.metadata === undefined ? {} : { metadata: structuredClone(input.metadata) }),
+  };
+  const sensitiveFindings = scanSensitiveContent(withoutHash);
+  if (sensitiveFindings.length > 0) {
+    throw new CoreDomainError("HANDOFF_INTEGRITY_ERROR", {
+      entity: "handoff",
+      reason: "SENSITIVE_CONTENT",
+      finding_paths: [...new Set(sensitiveFindings.map((finding) => finding.path))].sort(),
+      finding_rules: [...new Set(sensitiveFindings.map((finding) => finding.rule))].sort(),
+    });
+  }
+
+  try {
+    return parseHandoffPackage({
+      ...withoutHash,
+      content_hash: computeContentHash(withoutHash),
+    });
+  } catch {
+    throw handoffIntegrityError("GENERATED_HANDOFF_INVALID");
+  }
 }
 
 export function selectExplicitHandoffs(value: unknown): HandoffSelectionResult {
@@ -319,6 +386,10 @@ function compareHandoffs(left: HandoffPackage, right: HandoffPackage): number {
 
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function sorted(values: readonly string[]): readonly string[] {
+  return Object.freeze([...values].sort(compareText));
 }
 
 function isGitCommit(value: unknown): value is string {
