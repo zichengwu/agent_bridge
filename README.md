@@ -20,10 +20,13 @@ Agent Bridge 是运行在开发者本机的单用户、单机协作控制层，�
 - **本地 Artifact Repository**：内容寻址、SHA-256 校验、原子写入、去重、路径与符号链接防护，以及不执行删除的孤儿清理预览。
 - **持久事件观察**：观察端从权威事件游标独立读取历史与后续事件；异常、断开或慢消费者不会终止任务或影响其他观察端。
 - **供应商中立可观测接口**：提供结构化日志与 Trace/Span 抽象，不绑定具体日志、OpenTelemetry SDK 或云端后端。
+- **运行期 Context 与 Handoff**：从 Repository、Git 和验证 Artifact 的权威事实组装 Context，并生成确定、可校验且经过敏感信息扫描的 Handoff。
+- **独立验收执行**：只执行严格配置的命令合同；Tester 可请求、Reviewer 不可触发，支持超时、取消、进程树清理、输出脱敏和 Artifact 归档。
+- **显式 Driver 降级**：OpenCode 不健康或新 Run 启动失败时，只有能力检查通过并获得显式确认，才为一个新的 Run 选择 Claude；不会切换正在运行的任务。
+- **严格运行时配置**：无凭据配置只接受 OpenCode 主 Driver、Claude 降级 Driver 和独立验证命令目录；拒绝未知字段、历史 Cline 字段及凭据类字段。
 
 ## 尚未完成的产品边界
 
-- 运行期 Context/Handoff 组装、独立验收执行、正式 Driver 降级编排和最终配置迁移尚未实现。
 - Bridge 重启后的正式 Driver 端到端恢复尚未完成；当前只提供进程监督、Driver checkpoint 和恢复决策。
 - Artifact 自动保留期清理、磁盘配额和内容 tombstone 尚未实现；当前只清理失败/过期临时文件并提供孤儿候选预览。
 - MCP stdio、管理 CLI、HTTP API 和图形界面尚未实现。
@@ -34,18 +37,18 @@ Agent Bridge 是运行在开发者本机的单用户、单机协作控制层，�
 
 Bridge Core 只依赖版本化 Driver Protocol，不直接依赖 OpenCode、Claude 或其他具体 Agent SDK。
 
-| 路径                           | 职责                                                             | 当前状态                        |
-| ------------------------------ | ---------------------------------------------------------------- | ------------------------------- |
-| `packages/schemas`             | 领域 Schema、解析和版本合同                                      | 已实现                          |
-| `packages/core`                | 状态机、Session、Context/Handoff 策略、Repository 和领域事件     | 已实现；当前提供内存 Repository |
-| `packages/driver-protocol`     | Agent Driver Contract、运行时断言和 JSONL/stdin-stdout Transport | 已实现                          |
-| `packages/driver-opencode`     | OpenCode 主 Driver 和独立 Worker 入口                            | 已实现                          |
-| `packages/driver-claude-agent` | Claude Agent SDK 降级 Driver 和独立 Worker 入口                  | 已实现                          |
-| `packages/worker-runtime`      | 进程监督、角色权限、路径策略、Git/worktree、租约和恢复决策       | 已实现                          |
-| `packages/storage-sqlite`      | SQLite Repository、Artifact 引用索引与事务性 Outbox              | 已实现                          |
-| `packages/artifacts-local`     | 本地产物存储、完整性和安全清理基础                               | 已实现                          |
-| `packages/observability`       | 持久事件观察、结构化日志与遥测抽象                               | 已实现                          |
-| `apps/bridge-mcp`              | Codex 面向 Bridge 的 MCP stdio 接口                              | 应用骨架                        |
+| 路径                           | 职责                                                             | 当前状态 |
+| ------------------------------ | ---------------------------------------------------------------- | -------- |
+| `packages/schemas`             | 领域 Schema、解析和版本合同                                      | 已实现   |
+| `packages/core`                | 状态机、Session、Context/Handoff 策略、Repository 和领域事件     | 已实现   |
+| `packages/driver-protocol`     | Agent Driver Contract、运行时断言和 JSONL/stdin-stdout Transport | 已实现   |
+| `packages/driver-opencode`     | OpenCode 主 Driver 和独立 Worker 入口                            | 已实现   |
+| `packages/driver-claude-agent` | Claude Agent SDK 降级 Driver 和独立 Worker 入口                  | 已实现   |
+| `packages/worker-runtime`      | Context/Handoff、验收、Driver 选择、Run 编排、Git 与恢复策略     | 已实现   |
+| `packages/storage-sqlite`      | SQLite Repository、Artifact 引用索引与事务性 Outbox              | 已实现   |
+| `packages/artifacts-local`     | 本地产物存储、完整性和安全清理基础                               | 已实现   |
+| `packages/observability`       | 持久事件观察、结构化日志与遥测抽象                               | 已实现   |
+| `apps/bridge-mcp`              | Codex 面向 Bridge 的 MCP stdio 接口                              | 应用骨架 |
 
 ## 环境要求
 

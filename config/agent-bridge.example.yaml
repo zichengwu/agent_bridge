@@ -1,7 +1,10 @@
-# Agent Bridge 本地示例配置，不得在此文件中填写真实凭据。
+# Agent Bridge MVP 本地运行时示例。不得填写真实凭据或 Agent 登录信息。
+schema_version: 1
+
 project:
   id: example-project
   workspace_root: /absolute/path/to/project
+  runtime_root: /absolute/path/to/agent-bridge-runtime
 
 limits:
   timeout_seconds: 3600
@@ -11,7 +14,31 @@ limits:
 context:
   rollover_ratio: 0.7
 
-cline:
-  backend_mode: hub
-  provider_id: configured-provider
-  model_id: configured-model
+drivers:
+  primary:
+    id: opencode
+    executable: /absolute/path/to/agent-bridge-driver-opencode
+    args:
+      - --stdio
+    startup_timeout_ms: 30000
+    request_timeout_ms: 10000
+  fallback:
+    id: claude-agent
+    enabled: true
+    # Claude 组件可暂时缺失；只有显式降级决策时才检查此路径。
+    executable: /absolute/path/to/agent-bridge-driver-claude-agent
+    args:
+      - --stdio
+    startup_timeout_ms: 30000
+    request_timeout_ms: 10000
+
+verification:
+  max_output_bytes: 1048576
+  termination_grace_ms: 1000
+  commands:
+    verify:
+      contract: pnpm verify
+      executable: /absolute/path/to/pnpm
+      args:
+        - verify
+      timeout_seconds: 3600

@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
   CoreDomainError,
   computeContentHash,
+  generateHandoffPackage,
   selectExplicitHandoffs,
   type CoreDomainErrorCode,
   type HandoffCandidate,
@@ -22,6 +23,90 @@ const sourceBase = "aaaaaaa";
 const sourceHead = "ccccccc";
 
 describe("Handoff 显式选择与完整性策略", () => {
+  it("从权威字段生成稳定、完整且已排序的 Handoff", () => {
+    const first = generateHandoffPackage({
+      handoff_id: "handoff-generated",
+      handoff_version: 1,
+      source_task: { task_id: "source-task", task_version: 1, final_run_id: "run-source" },
+      code_state: {
+        repository_id: "repository-1",
+        base_commit: sourceBase,
+        head_commit: sourceHead,
+      },
+      completed: ["第二项", "第一项"],
+      decisions: ["保持契约"],
+      contracts: ["POST /tasks"],
+      changed_files: ["src/z.ts", "src/a.ts"],
+      verification: { status: "passed", artifact_ids: ["artifact-z", "artifact-a"] },
+      known_issues: [],
+      downstream_notes: ["继续复用 Repository"],
+      field_sources: {
+        completed: "agent",
+        decisions: "human",
+        contracts: "bridge",
+        known_issues: "agent",
+        downstream_notes: "agent",
+      },
+      generated_at: timestamp,
+    });
+    const second = generateHandoffPackage({
+      handoff_id: "handoff-generated",
+      handoff_version: 1,
+      source_task: { task_id: "source-task", task_version: 1, final_run_id: "run-source" },
+      code_state: {
+        repository_id: "repository-1",
+        base_commit: sourceBase,
+        head_commit: sourceHead,
+      },
+      completed: ["第一项", "第二项"],
+      decisions: ["保持契约"],
+      contracts: ["POST /tasks"],
+      changed_files: ["src/a.ts", "src/z.ts"],
+      verification: { status: "passed", artifact_ids: ["artifact-a", "artifact-z"] },
+      known_issues: [],
+      downstream_notes: ["继续复用 Repository"],
+      field_sources: {
+        completed: "agent",
+        decisions: "human",
+        contracts: "bridge",
+        known_issues: "agent",
+        downstream_notes: "agent",
+      },
+      generated_at: timestamp,
+    });
+
+    expect(first.changed_files).toEqual(["src/a.ts", "src/z.ts"]);
+    expect(first.verification.artifact_ids).toEqual(["artifact-a", "artifact-z"]);
+    expect(first.content_hash).toBe(second.content_hash);
+  });
+
+  it("拒绝让 Agent 成为 decisions 或 contracts 的权威来源", () => {
+    expect(() =>
+      generateHandoffPackage({
+        ...handoffGenerationInput(),
+        field_sources: {
+          ...handoffGenerationInput().field_sources,
+          decisions: "agent",
+        },
+      }),
+    ).toThrowError(expect.objectContaining({ code: "HANDOFF_INTEGRITY_ERROR" }));
+  });
+
+  it("生成前扫描敏感内容且错误不回显敏感值", () => {
+    const secret = "sk-sensitive-generated-handoff";
+    const error = expectCoreError(
+      () =>
+        generateHandoffPackage({
+          ...handoffGenerationInput(),
+          downstream_notes: [{ api_key: secret }] as unknown as readonly string[],
+        }),
+      "HANDOFF_INTEGRITY_ERROR",
+    );
+
+    expect(error.details.reason).toBe("SENSITIVE_CONTENT");
+    expect(JSON.stringify(error)).not.toContain(secret);
+  });
+
   it.each(["depends_on", "related_to", "supersedes", "follow_up_of"] as const)(
     "接受显式选择且完整的 %s Handoff",
     (type) => {
@@ -206,6 +291,34 @@ describe("Handoff 显式选择与完整性策略", () => {
     expect(JSON.stringify(error)).not.toContain(secret);
   });
 });
+
+function handoffGenerationInput(): Parameters<typeof generateHandoffPackage>[0] {
+  return {
+    handoff_id: "handoff-generated",
+    handoff_version: 1,
+    source_task: { task_id: "source-task", task_version: 1, final_run_id: "run-source" },
+    code_state: {
+      repository_id: "repository-1",
+      base_commit: sourceBase,
+      head_commit: sourceHead,
+    },
+    completed: [],
+    decisions: [],
+    contracts: [],
+    changed_files: [],
+    verification: { status: "not_run", artifact_ids: [] },
+    known_issues: [],
+    downstream_notes: [],
+    field_sources: {
+      completed: "agent",
+      decisions: "human",
+      contracts: "bridge",
+      known_issues: "agent",
+      downstream_notes: "agent",
+    },
+    generated_at: timestamp,
+  };
+}
 
 function selectionInput(
   type: TaskRelationType,
