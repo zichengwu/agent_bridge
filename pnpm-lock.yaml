@@ -41,7 +41,11 @@ importers:
 
   apps/bridge-mcp: {}
 
-  packages/artifacts-local: {}
+  packages/artifacts-local:
+    dependencies:
+      '@agent-bridge/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/core:
     dependencies:
@@ -84,11 +88,25 @@ importers:
 
   packages/driver-protocol: {}
 
-  packages/observability: {}
+  packages/observability:
+    dependencies:
+      '@agent-bridge/core':
+        specifier: workspace:*
+        version: link:../core
+      '@agent-bridge/schemas':
+        specifier: workspace:*
+        version: link:../schemas
 
   packages/schemas: {}
 
-  packages/storage-sqlite: {}
+  packages/storage-sqlite:
+    dependencies:
+      '@agent-bridge/core':
+        specifier: workspace:*
+        version: link:../core
+      '@agent-bridge/schemas':
+        specifier: workspace:*
+        version: link:../schemas
 
   packages/worker-runtime:
     dependencies:

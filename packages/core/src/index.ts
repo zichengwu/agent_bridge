@@ -1,4 +1,5 @@
 export * from "./agent-run-lifecycle.js";
+export * from "./artifact-repository.js";
 export * from "./content-integrity.js";
 export * from "./context-policy.js";
 export * from "./domain-events.js";
