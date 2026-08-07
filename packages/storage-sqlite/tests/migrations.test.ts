@@ -16,6 +16,42 @@ afterEach(async () => {
 });
 
 describe("SQLite migration", () => {
+  it("upgrades an existing verified v1 database to v2 without rewriting v1 metadata", async () => {
+    const path = await databasePath();
+    const legacy = new DatabaseSync(path);
+    legacy.exec(`
+      CREATE TABLE schema_migrations (
+        version INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        checksum TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+      ) STRICT;
+      INSERT INTO schema_migrations(version, name, checksum, applied_at)
+      VALUES (1, 'phase_2f_initial', 'phase-2f-v1-2026-07-31', '2026-07-31T00:00:00.000Z');
+      PRAGMA user_version = 1;
+    `);
+    legacy.close();
+
+    const repository = new SqliteDomainRepository({ database_path: path });
+    repository.close();
+    const upgraded = new DatabaseSync(path);
+    expect(
+      (upgraded.prepare("PRAGMA user_version").get() as { user_version: number }).user_version,
+    ).toBe(2);
+    expect(
+      upgraded.prepare("SELECT version, name FROM schema_migrations ORDER BY version").all(),
+    ).toEqual([
+      { version: 1, name: "phase_2f_initial" },
+      { version: 2, name: "phase_3_control_records" },
+    ]);
+    expect(
+      upgraded
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'review_cycles'")
+        .get(),
+    ).toEqual({ name: "review_cycles" });
+    upgraded.close();
+  });
+
   it("creates versioned schema once and reopens without rewriting it", async () => {
     const path = await databasePath();
     const first = new SqliteDomainRepository({ database_path: path });
@@ -35,8 +71,12 @@ describe("SQLite migration", () => {
       expect.arrayContaining([
         "agent_runs",
         "artifact_references",
+        "approval_requests",
+        "control_invocations",
         "domain_events",
         "outbox",
+        "project_baselines",
+        "review_cycles",
         "schema_migrations",
         "tasks",
       ]),

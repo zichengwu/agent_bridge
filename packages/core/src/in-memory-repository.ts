@@ -24,6 +24,10 @@ import {
   type RepositoryRecordVersion,
   type StoredDomainRecord,
   type TaskRelationQuery,
+  type TaskQuery,
+  type AgentRunQuery,
+  type ApprovalRequestQuery,
+  type ReviewCycleQuery,
 } from "./repository.js";
 import { readAgentSessionBindingSet } from "./session-binding.js";
 
@@ -165,6 +169,21 @@ export class InMemoryDomainRepository implements DomainRepository {
     return this.getRecord("task", readIdentifier(taskId, "TASK_ID_INVALID"));
   }
 
+  async listTasks(value: TaskQuery = {}): Promise<readonly StoredDomainRecord<"task">[]> {
+    await Promise.resolve();
+    const query = readTaskQuery(value);
+    return Object.freeze(
+      this.listRecords("task")
+        .filter(
+          (record) =>
+            (query.project_id === undefined || record.value.project_id === query.project_id) &&
+            (query.status === undefined || record.value.status === query.status),
+        )
+        .sort((left, right) => compareText(left.record_id, right.record_id))
+        .slice(0, query.limit),
+    );
+  }
+
   async getTaskVersion(
     reference: TaskVersionReference,
   ): Promise<StoredDomainRecord<"task_version"> | undefined> {
@@ -173,9 +192,29 @@ export class InMemoryDomainRepository implements DomainRepository {
     return this.getRecord("task_version", `${scope.task_id}:v${scope.task_version}`);
   }
 
+  async listTaskVersions(taskId: string): Promise<readonly StoredDomainRecord<"task_version">[]> {
+    await Promise.resolve();
+    const id = readIdentifier(taskId, "TASK_ID_INVALID");
+    return Object.freeze(
+      this.listRecords("task_version")
+        .filter((record) => record.value.task_id === id)
+        .sort((left, right) => left.value.task_version - right.value.task_version),
+    );
+  }
+
   async getTaskResult(runId: string): Promise<StoredDomainRecord<"task_result"> | undefined> {
     await Promise.resolve();
     return this.getRecord("task_result", readIdentifier(runId, "RUN_ID_INVALID"));
+  }
+
+  async listTaskResults(taskId: string): Promise<readonly StoredDomainRecord<"task_result">[]> {
+    await Promise.resolve();
+    const id = readIdentifier(taskId, "TASK_ID_INVALID");
+    return Object.freeze(
+      this.listRecords("task_result")
+        .filter((record) => record.value.task_id === id)
+        .sort((left, right) => compareText(left.value.finished_at, right.value.finished_at)),
+    );
   }
 
   async getTaskRelation(
@@ -200,6 +239,25 @@ export class InMemoryDomainRepository implements DomainRepository {
   async getAgentRun(runId: string): Promise<StoredDomainRecord<"agent_run"> | undefined> {
     await Promise.resolve();
     return this.getRecord("agent_run", readIdentifier(runId, "RUN_ID_INVALID"));
+  }
+
+  async listAgentRuns(
+    value: AgentRunQuery = {},
+  ): Promise<readonly StoredDomainRecord<"agent_run">[]> {
+    await Promise.resolve();
+    const query = readAgentRunQuery(value);
+    return Object.freeze(
+      this.listRecords("agent_run")
+        .filter(
+          (record) =>
+            (query.task_id === undefined || record.value.task_id === query.task_id) &&
+            (query.task_version === undefined ||
+              record.value.task_version === query.task_version) &&
+            (query.status === undefined || record.value.status === query.status),
+        )
+        .sort((left, right) => compareText(left.value.created_at, right.value.created_at))
+        .slice(0, query.limit),
+    );
   }
 
   async listRecoveryCandidates(
@@ -303,6 +361,74 @@ export class InMemoryDomainRepository implements DomainRepository {
   ): Promise<StoredDomainRecord<"continuation_snapshot"> | undefined> {
     const snapshots = await this.listContinuationSnapshots(runId);
     return snapshots.at(-1);
+  }
+
+  async getProjectBaseline(projectId: string, baselineVersion: number) {
+    await Promise.resolve();
+    const id = readIdentifier(projectId, "PROJECT_ID_INVALID");
+    const version = readPositiveInteger(baselineVersion, "BASELINE_VERSION_INVALID");
+    return this.getRecord("project_baseline", `${id}:v${version}`);
+  }
+
+  async listProjectBaselines(projectId: string) {
+    await Promise.resolve();
+    const id = readIdentifier(projectId, "PROJECT_ID_INVALID");
+    return Object.freeze(
+      this.listRecords("project_baseline")
+        .filter((record) => record.value.project_id === id)
+        .sort((left, right) => left.value.baseline_version - right.value.baseline_version),
+    );
+  }
+
+  async getApprovalRequest(approvalId: string) {
+    await Promise.resolve();
+    return this.getRecord("approval_request", readIdentifier(approvalId, "APPROVAL_ID_INVALID"));
+  }
+
+  async listApprovalRequests(value: ApprovalRequestQuery = {}) {
+    await Promise.resolve();
+    const query = readApprovalQuery(value);
+    return Object.freeze(
+      this.listRecords("approval_request")
+        .filter(
+          (record) =>
+            (query.task_id === undefined || record.value.task_id === query.task_id) &&
+            (query.run_id === undefined || record.value.run_id === query.run_id) &&
+            (query.status === undefined || record.value.status === query.status),
+        )
+        .sort((left, right) => compareText(left.value.requested_at, right.value.requested_at))
+        .slice(0, query.limit),
+    );
+  }
+
+  async getReviewCycle(reviewId: string) {
+    await Promise.resolve();
+    return this.getRecord("review_cycle", readIdentifier(reviewId, "REVIEW_ID_INVALID"));
+  }
+
+  async listReviewCycles(value: ReviewCycleQuery) {
+    await Promise.resolve();
+    const query = readReviewQuery(value);
+    return Object.freeze(
+      this.listRecords("review_cycle")
+        .filter(
+          (record) =>
+            record.value.task_id === query.task_id &&
+            (query.task_version === undefined ||
+              record.value.task_version === query.task_version) &&
+            (query.run_id === undefined || record.value.run_id === query.run_id),
+        )
+        .sort((left, right) => left.value.cycle_number - right.value.cycle_number)
+        .slice(0, query.limit),
+    );
+  }
+
+  async getControlInvocation(invocationId: string) {
+    await Promise.resolve();
+    return this.getRecord(
+      "control_invocation",
+      readIdentifier(invocationId, "INVOCATION_ID_INVALID"),
+    );
   }
 
   async listDomainEvents(value: DomainEventQuery = {}): Promise<DomainEventPage> {
@@ -431,6 +557,71 @@ function readRecoveryQuery(
     ...(value.project_id === undefined ? {} : { project_id: value.project_id }),
     limit: readLimit(value.limit),
   });
+}
+
+function readTaskQuery(value: unknown) {
+  if (
+    !isPlainRecord(value) ||
+    !hasOnlyKeys(value, ["project_id", "status", "limit"]) ||
+    (value.project_id !== undefined && !isIdentifier(value.project_id)) ||
+    (value.status !== undefined && typeof value.status !== "string")
+  ) {
+    throw invalidQuery("TASK_QUERY_INVALID");
+  }
+  return Object.freeze({ ...value, limit: readLimit(value.limit) }) as Required<
+    Pick<TaskQuery, "limit">
+  > &
+    Omit<TaskQuery, "limit">;
+}
+
+function readAgentRunQuery(value: unknown) {
+  if (
+    !isPlainRecord(value) ||
+    !hasOnlyKeys(value, ["task_id", "task_version", "status", "limit"]) ||
+    (value.task_id !== undefined && !isIdentifier(value.task_id)) ||
+    (value.task_version !== undefined && !isPositiveInteger(value.task_version)) ||
+    (value.status !== undefined && typeof value.status !== "string")
+  ) {
+    throw invalidQuery("AGENT_RUN_QUERY_INVALID");
+  }
+  return Object.freeze({ ...value, limit: readLimit(value.limit) }) as Required<
+    Pick<AgentRunQuery, "limit">
+  > &
+    Omit<AgentRunQuery, "limit">;
+}
+
+function readApprovalQuery(value: unknown) {
+  if (
+    !isPlainRecord(value) ||
+    !hasOnlyKeys(value, ["task_id", "run_id", "status", "limit"]) ||
+    (value.task_id !== undefined && !isIdentifier(value.task_id)) ||
+    (value.run_id !== undefined && !isIdentifier(value.run_id)) ||
+    (value.status !== undefined &&
+      (typeof value.status !== "string" ||
+        !["pending", "approved", "denied", "cancelled"].includes(value.status)))
+  ) {
+    throw invalidQuery("APPROVAL_QUERY_INVALID");
+  }
+  return Object.freeze({ ...value, limit: readLimit(value.limit) }) as Required<
+    Pick<ApprovalRequestQuery, "limit">
+  > &
+    Omit<ApprovalRequestQuery, "limit">;
+}
+
+function readReviewQuery(value: unknown) {
+  if (
+    !isPlainRecord(value) ||
+    !hasOnlyKeys(value, ["task_id", "task_version", "run_id", "limit"]) ||
+    !isIdentifier(value.task_id) ||
+    (value.task_version !== undefined && !isPositiveInteger(value.task_version)) ||
+    (value.run_id !== undefined && !isIdentifier(value.run_id))
+  ) {
+    throw invalidQuery("REVIEW_QUERY_INVALID");
+  }
+  return Object.freeze({ ...value, limit: readLimit(value.limit) }) as Required<
+    Pick<ReviewCycleQuery, "limit">
+  > &
+    Omit<ReviewCycleQuery, "limit">;
 }
 
 function readEventQuery(

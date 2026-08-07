@@ -24,6 +24,7 @@ export interface AgentBridgeRuntimeConfiguration {
     readonly id: string;
     readonly workspace_root: string;
     readonly runtime_root: string;
+    readonly project_baseline_path: string;
   };
   readonly limits: {
     readonly timeout_seconds: number;
@@ -72,10 +73,11 @@ export function parseRuntimeConfiguration(value: unknown): AgentBridgeRuntimeCon
   }
 
   const project = record(root.project, "PROJECT_CONFIG_INVALID");
-  onlyKeys(project, ["id", "workspace_root", "runtime_root"]);
+  onlyKeys(project, ["id", "workspace_root", "runtime_root", "project_baseline_path"]);
   const projectId = identifier(project.id, "PROJECT_CONFIG_INVALID");
   const workspaceRoot = absolutePath(project.workspace_root, "PROJECT_CONFIG_INVALID");
   const runtimeRoot = absolutePath(project.runtime_root, "PROJECT_CONFIG_INVALID");
+  const projectBaselinePath = absolutePath(project.project_baseline_path, "PROJECT_CONFIG_INVALID");
 
   const limits = record(root.limits, "LIMITS_CONFIG_INVALID");
   onlyKeys(limits, ["timeout_seconds", "max_review_cycles", "max_agent_count"]);
@@ -152,6 +154,7 @@ export function parseRuntimeConfiguration(value: unknown): AgentBridgeRuntimeCon
       id: projectId,
       workspace_root: workspaceRoot,
       runtime_root: runtimeRoot,
+      project_baseline_path: projectBaselinePath,
     }),
     limits: Object.freeze({
       timeout_seconds: timeoutSeconds,

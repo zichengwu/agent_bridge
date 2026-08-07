@@ -2,10 +2,12 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { SqliteStorageError } from "./errors.js";
 
-export const SQLITE_SCHEMA_VERSION = 1 as const;
+export const SQLITE_SCHEMA_VERSION = 2 as const;
 
 const MIGRATION_NAME = "phase_2f_initial";
 const MIGRATION_CHECKSUM = "phase-2f-v1-2026-07-31";
+const PHASE_3_MIGRATION_NAME = "phase_3_control_records";
+const PHASE_3_MIGRATION_CHECKSUM = "phase-3-v2-2026-07-31";
 
 const RECORD_TABLES_SQL = [
   `CREATE TABLE tasks (
@@ -101,6 +103,60 @@ const RECORD_TABLES_SQL = [
   ) STRICT`,
 ] as const;
 
+const PHASE_3_SQL = `
+  CREATE TABLE project_baselines (
+    record_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL CHECK (revision = 1),
+    value_json TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    baseline_version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (project_id, baseline_version)
+  ) STRICT;
+  CREATE INDEX project_baselines_project_idx
+    ON project_baselines(project_id, baseline_version);
+
+  CREATE TABLE approval_requests (
+    record_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    value_json TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    task_version INTEGER NOT NULL,
+    run_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    requested_at TEXT NOT NULL
+  ) STRICT;
+  CREATE INDEX approval_requests_scope_idx
+    ON approval_requests(task_id, run_id, status, requested_at);
+
+  CREATE TABLE review_cycles (
+    record_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    value_json TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    task_version INTEGER NOT NULL,
+    run_id TEXT NOT NULL,
+    cycle_number INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (run_id, cycle_number)
+  ) STRICT;
+  CREATE INDEX review_cycles_scope_idx
+    ON review_cycles(task_id, task_version, run_id, cycle_number);
+
+  CREATE TABLE control_invocations (
+    record_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL CHECK (revision = 1),
+    value_json TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    task_id TEXT,
+    run_id TEXT,
+    occurred_at TEXT NOT NULL
+  ) STRICT;
+  CREATE INDEX control_invocations_scope_idx
+    ON control_invocations(task_id, run_id, occurred_at);
+`;
+
 export function migrateSqliteDatabase(database: DatabaseSync): void {
   const version = readUserVersion(database);
   if (version > SQLITE_SCHEMA_VERSION) {
@@ -111,7 +167,14 @@ export function migrateSqliteDatabase(database: DatabaseSync): void {
   }
 
   if (version === SQLITE_SCHEMA_VERSION) {
-    assertMigrationChecksum(database);
+    assertMigrationChecksum(database, 1, MIGRATION_NAME, MIGRATION_CHECKSUM);
+    assertMigrationChecksum(database, 2, PHASE_3_MIGRATION_NAME, PHASE_3_MIGRATION_CHECKSUM);
+    return;
+  }
+
+  if (version === 1) {
+    assertMigrationChecksum(database, 1, MIGRATION_NAME, MIGRATION_CHECKSUM);
+    applyPhase3Migration(database);
     return;
   }
 
@@ -200,7 +263,14 @@ export function migrateSqliteDatabase(database: DatabaseSync): void {
         `INSERT INTO schema_migrations(version, name, checksum, applied_at)
          VALUES (?, ?, ?, ?)`,
       )
-      .run(SQLITE_SCHEMA_VERSION, MIGRATION_NAME, MIGRATION_CHECKSUM, new Date().toISOString());
+      .run(1, MIGRATION_NAME, MIGRATION_CHECKSUM, new Date().toISOString());
+    database.exec(PHASE_3_SQL);
+    database
+      .prepare(
+        `INSERT INTO schema_migrations(version, name, checksum, applied_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(2, PHASE_3_MIGRATION_NAME, PHASE_3_MIGRATION_CHECKSUM, new Date().toISOString());
     database.exec(`PRAGMA user_version = ${SQLITE_SCHEMA_VERSION}`);
     database.exec("COMMIT");
   } catch (error) {
@@ -218,21 +288,44 @@ function readUserVersion(database: DatabaseSync): number {
   return row?.user_version ?? 0;
 }
 
-function assertMigrationChecksum(database: DatabaseSync): void {
+function assertMigrationChecksum(
+  database: DatabaseSync,
+  version: number,
+  expectedName: string,
+  expectedChecksum: string,
+): void {
   let row: { readonly name?: string; readonly checksum?: string } | undefined;
   try {
     row = database
       .prepare("SELECT name, checksum FROM schema_migrations WHERE version = ?")
-      .get(SQLITE_SCHEMA_VERSION);
+      .get(version);
   } catch {
     throw new SqliteStorageError("MIGRATION_FAILED", {
       current_version: SQLITE_SCHEMA_VERSION,
     });
   }
-  if (row?.name !== MIGRATION_NAME || row.checksum !== MIGRATION_CHECKSUM) {
+  if (row?.name !== expectedName || row.checksum !== expectedChecksum) {
     throw new SqliteStorageError("MIGRATION_FAILED", {
       current_version: SQLITE_SCHEMA_VERSION,
     });
+  }
+}
+
+function applyPhase3Migration(database: DatabaseSync): void {
+  try {
+    database.exec("BEGIN IMMEDIATE");
+    database.exec(PHASE_3_SQL);
+    database
+      .prepare(
+        `INSERT INTO schema_migrations(version, name, checksum, applied_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(2, PHASE_3_MIGRATION_NAME, PHASE_3_MIGRATION_CHECKSUM, new Date().toISOString());
+    database.exec("PRAGMA user_version = 2");
+    database.exec("COMMIT");
+  } catch {
+    rollbackQuietly(database);
+    throw new SqliteStorageError("MIGRATION_FAILED", { target_version: 2 });
   }
 }
 

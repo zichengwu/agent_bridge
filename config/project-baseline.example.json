@@ -1,0 +1,10 @@
+{
+  "baseline_version": 1,
+  "content": {
+    "project_name": "example-project",
+    "repository_conventions": [
+      "Do not write outside the task scope.",
+      "Run the declared acceptance commands before submission."
+    ]
+  }
+}

@@ -13,6 +13,10 @@ export const DOMAIN_SCHEMA_KINDS = [
   "contextPackage",
   "handoffPackage",
   "continuationSnapshot",
+  "projectBaseline",
+  "approvalRequest",
+  "reviewCycle",
+  "controlInvocation",
 ] as const;
 
 export type DomainSchemaKind = (typeof DOMAIN_SCHEMA_KINDS)[number];
@@ -26,4 +30,8 @@ export const DOMAIN_SCHEMA_IDS = {
   contextPackage: "urn:agent-bridge:schema:domain:context-package:1.0",
   handoffPackage: "urn:agent-bridge:schema:domain:handoff-package:1.0",
   continuationSnapshot: "urn:agent-bridge:schema:domain:continuation-snapshot:1.0",
+  projectBaseline: "urn:agent-bridge:schema:domain:project-baseline:1.0",
+  approvalRequest: "urn:agent-bridge:schema:domain:approval-request:1.0",
+  reviewCycle: "urn:agent-bridge:schema:domain:review-cycle:1.0",
+  controlInvocation: "urn:agent-bridge:schema:domain:control-invocation:1.0",
 } as const satisfies Readonly<Record<DomainSchemaKind, string>>;

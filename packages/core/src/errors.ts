@@ -25,6 +25,11 @@ export const CORE_DOMAIN_ERROR_CODES = [
   "REPOSITORY_WRITE_CONFLICT",
   "REPOSITORY_IDEMPOTENCY_CONFLICT",
   "REPOSITORY_QUERY_INVALID",
+  "APPROVAL_INVALID",
+  "APPROVAL_STALE",
+  "REVIEW_CYCLE_INVALID",
+  "REVIEW_LIMIT_REACHED",
+  "REVIEW_SCOPE_CONFLICT",
 ] as const;
 
 export type CoreDomainErrorCode = (typeof CORE_DOMAIN_ERROR_CODES)[number];
@@ -55,6 +60,11 @@ const ERROR_MESSAGES = {
   REPOSITORY_WRITE_CONFLICT: "Repository write conflicts with authoritative state",
   REPOSITORY_IDEMPOTENCY_CONFLICT: "Repository idempotency key conflicts with an earlier request",
   REPOSITORY_QUERY_INVALID: "Repository query is invalid",
+  APPROVAL_INVALID: "Approval request is invalid",
+  APPROVAL_STALE: "Approval request is stale or already decided",
+  REVIEW_CYCLE_INVALID: "Review cycle is invalid",
+  REVIEW_LIMIT_REACHED: "Review cycle limit has been reached",
+  REVIEW_SCOPE_CONFLICT: "Review feedback does not match the current task scope",
 } as const satisfies Readonly<Record<CoreDomainErrorCode, string>>;
 
 export class CoreDomainError extends Error {

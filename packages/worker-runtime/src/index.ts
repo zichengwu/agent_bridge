@@ -1,4 +1,5 @@
 export * from "./command-policy.js";
+export * from "./active-run-registry.js";
 export * from "./context-handoff-runtime.js";
 export * from "./driver-selection.js";
 export * from "./errors.js";

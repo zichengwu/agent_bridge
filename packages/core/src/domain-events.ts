@@ -15,6 +15,10 @@ export const DOMAIN_AGGREGATE_KINDS = [
   "context_package",
   "handoff_package",
   "continuation_snapshot",
+  "project_baseline",
+  "approval_request",
+  "review_cycle",
+  "control_invocation",
 ] as const;
 
 export type DomainAggregateKind = (typeof DOMAIN_AGGREGATE_KINDS)[number];
@@ -33,6 +37,12 @@ export const AUTHORITATIVE_DOMAIN_EVENT_TYPES = [
   "context_package.recorded",
   "handoff_package.recorded",
   "continuation_snapshot.recorded",
+  "project_baseline.recorded",
+  "approval_request.recorded",
+  "approval_request.status_changed",
+  "review_cycle.recorded",
+  "review_cycle.status_changed",
+  "control_invocation.recorded",
 ] as const;
 
 export type AuthoritativeDomainEventType = (typeof AUTHORITATIVE_DOMAIN_EVENT_TYPES)[number];
@@ -119,6 +129,12 @@ const EVENT_AGGREGATE_KIND = {
   "context_package.recorded": "context_package",
   "handoff_package.recorded": "handoff_package",
   "continuation_snapshot.recorded": "continuation_snapshot",
+  "project_baseline.recorded": "project_baseline",
+  "approval_request.recorded": "approval_request",
+  "approval_request.status_changed": "approval_request",
+  "review_cycle.recorded": "review_cycle",
+  "review_cycle.status_changed": "review_cycle",
+  "control_invocation.recorded": "control_invocation",
 } as const satisfies Readonly<Record<AuthoritativeDomainEventType, DomainAggregateKind>>;
 
 export function readAuditEnvelope(value: unknown): AuditEnvelope {

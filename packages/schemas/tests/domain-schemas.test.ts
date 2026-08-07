@@ -194,6 +194,58 @@ const minimalSamples: Readonly<Record<DomainSchemaKind, SampleFactory>> = {
     content_hash: secondContentHash,
     created_at: timestamp,
   }),
+  projectBaseline: () => ({
+    schema_version: DOMAIN_SCHEMA_VERSION,
+    project_id: "example-project",
+    baseline_version: 1,
+    content: { constraints: ["保持领域边界"] },
+    content_hash: contentHash,
+    created_at: timestamp,
+  }),
+  approvalRequest: () => ({
+    schema_version: DOMAIN_SCHEMA_VERSION,
+    approval_id: "approval-001",
+    task_id: "AUTH-123",
+    task_version: 1,
+    run_id: "run-001",
+    session_id: "session-001",
+    kind: "driver_permission",
+    operation: "tool.use",
+    request_hash: contentHash,
+    status: "pending",
+    requested_at: timestamp,
+  }),
+  reviewCycle: () => ({
+    schema_version: DOMAIN_SCHEMA_VERSION,
+    review_id: "review-001",
+    task_id: "AUTH-123",
+    task_version: 1,
+    run_id: "run-001",
+    session_id: "session-001",
+    cycle_number: 1,
+    target_commit: headCommit,
+    findings: [
+      {
+        finding_id: "finding-001",
+        severity: "error",
+        summary: "行为不符合合同",
+      },
+    ],
+    feedback_id: "feedback-001",
+    status: "requested",
+    verification_results: [],
+    created_at: timestamp,
+    updated_at: timestamp,
+  }),
+  controlInvocation: () => ({
+    schema_version: DOMAIN_SCHEMA_VERSION,
+    invocation_id: "invocation-001",
+    tool_name: "bridge_get_task",
+    actor: { kind: "controller", id: "controller-local" },
+    request_hash: contentHash,
+    status: "succeeded",
+    occurred_at: timestamp,
+  }),
 };
 
 const fullSamples: Readonly<Record<DomainSchemaKind, SampleFactory>> = {
@@ -361,6 +413,37 @@ const fullSamples: Readonly<Record<DomainSchemaKind, SampleFactory>> = {
     metadata: {
       rollover_reason: "manual",
     },
+  }),
+  projectBaseline: () => ({
+    ...minimalSamples.projectBaseline(),
+    metadata: { source: "configured_file" },
+  }),
+  approvalRequest: () => ({
+    ...minimalSamples.approvalRequest(),
+    status: "approved",
+    permission_id: "permission-001",
+    tool_call_id: "tool-call-001",
+    reason: "合同范围内操作",
+    decided_at: laterTimestamp,
+    decided_by: "human",
+    metadata: { policy: "explicit" },
+  }),
+  reviewCycle: () => ({
+    ...minimalSamples.reviewCycle(),
+    status: "verified",
+    candidate_commit: baseCommit,
+    verification_results: [
+      { command: "pnpm test", status: "passed", exit_code: 0, artifact_ids: [] },
+    ],
+    updated_at: laterTimestamp,
+    metadata: { bounded: true },
+  }),
+  controlInvocation: () => ({
+    ...minimalSamples.controlInvocation(),
+    task_id: "AUTH-123",
+    task_version: 1,
+    run_id: "run-001",
+    metadata: { transport: "stdio" },
   }),
 };
 

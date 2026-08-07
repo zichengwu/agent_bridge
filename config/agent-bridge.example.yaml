@@ -5,6 +5,7 @@ project:
   id: example-project
   workspace_root: /absolute/path/to/project
   runtime_root: /absolute/path/to/agent-bridge-runtime
+  project_baseline_path: /absolute/path/to/project-baseline.json
 
 limits:
   timeout_seconds: 3600

@@ -118,6 +118,7 @@ export interface ReviewFinding {
   readonly summary: string;
   readonly file?: string;
   readonly line?: number;
+  readonly expected_behavior?: string;
 }
 
 export interface ArtifactReference {
@@ -281,6 +282,78 @@ export interface ContinuationSnapshot {
   readonly metadata?: DomainMetadata;
 }
 
+export interface ProjectBaseline {
+  readonly schema_version: DomainSchemaVersion;
+  readonly project_id: string;
+  readonly baseline_version: number;
+  readonly content: DomainJsonValue;
+  readonly content_hash: string;
+  readonly created_at: string;
+  readonly metadata?: DomainMetadata;
+}
+
+export type ApprovalRequestStatus = "pending" | "approved" | "denied" | "cancelled";
+
+export interface ApprovalRequest {
+  readonly schema_version: DomainSchemaVersion;
+  readonly approval_id: string;
+  readonly task_id: string;
+  readonly task_version: number;
+  readonly run_id: string;
+  readonly session_id: string;
+  readonly kind: "driver_permission" | "control_operation";
+  readonly operation: string;
+  readonly request_hash: string;
+  readonly status: ApprovalRequestStatus;
+  readonly permission_id?: string;
+  readonly tool_call_id?: string;
+  readonly reason?: string;
+  readonly requested_at: string;
+  readonly decided_at?: string;
+  readonly decided_by?: "human" | "controller";
+  readonly metadata?: DomainMetadata;
+}
+
+export type ReviewCycleStatus =
+  "requested" | "feedback_dispatched" | "resubmitted" | "verified" | "resolved" | "exhausted";
+
+export interface ReviewCycle {
+  readonly schema_version: DomainSchemaVersion;
+  readonly review_id: string;
+  readonly task_id: string;
+  readonly task_version: number;
+  readonly run_id: string;
+  readonly session_id: string;
+  readonly cycle_number: number;
+  readonly target_commit: string;
+  readonly findings: readonly ReviewFinding[];
+  readonly feedback_id: string;
+  readonly status: ReviewCycleStatus;
+  readonly candidate_commit?: string;
+  readonly verification_results: readonly VerificationSummary[];
+  readonly created_at: string;
+  readonly updated_at: string;
+  readonly metadata?: DomainMetadata;
+}
+
+export interface ControlInvocation {
+  readonly schema_version: DomainSchemaVersion;
+  readonly invocation_id: string;
+  readonly tool_name: string;
+  readonly actor: {
+    readonly kind: "human" | "controller" | "bridge" | "system";
+    readonly id: string;
+  };
+  readonly request_hash: string;
+  readonly status: "succeeded" | "failed";
+  readonly error_code?: string;
+  readonly task_id?: string;
+  readonly task_version?: number;
+  readonly run_id?: string;
+  readonly occurred_at: string;
+  readonly metadata?: DomainMetadata;
+}
+
 export interface DomainSchemaTypeMap {
   readonly task: Task;
   readonly taskVersion: TaskVersion;
@@ -290,4 +363,8 @@ export interface DomainSchemaTypeMap {
   readonly contextPackage: ContextPackage;
   readonly handoffPackage: HandoffPackage;
   readonly continuationSnapshot: ContinuationSnapshot;
+  readonly projectBaseline: ProjectBaseline;
+  readonly approvalRequest: ApprovalRequest;
+  readonly reviewCycle: ReviewCycle;
+  readonly controlInvocation: ControlInvocation;
 }

@@ -29,6 +29,12 @@ const eventCases = [
   ["context_package.recorded", "context_package"],
   ["handoff_package.recorded", "handoff_package"],
   ["continuation_snapshot.recorded", "continuation_snapshot"],
+  ["project_baseline.recorded", "project_baseline"],
+  ["approval_request.recorded", "approval_request"],
+  ["approval_request.status_changed", "approval_request"],
+  ["review_cycle.recorded", "review_cycle"],
+  ["review_cycle.status_changed", "review_cycle"],
+  ["control_invocation.recorded", "control_invocation"],
 ] as const satisfies readonly (readonly [AuthoritativeDomainEventType, DomainAggregateKind])[];
 
 describe("权威领域事件与审计信封", () => {

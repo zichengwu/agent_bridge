@@ -4,7 +4,7 @@ Agent Bridge 是运行在开发者本机的单用户、单机协作控制层，�
 
 它不共享 Agent 的完整聊天记录或内部思考，而是通过版本化任务合同、Session 绑定、权限策略、独立 Git worktree 和结构化 Handoff，让不同 Agent 在明确边界内协作。Codex 负责需求、架构、审查和最终集成；受管 Code Agent 负责开发、测试、审查、文档或研究等执行任务；Git 与可重复验证命令作为代码和质量结果的权威来源。
 
-当前仓库处于 MVP 开发阶段，已经具备领域内核、正式 Agent Driver 和受监督 Worker Runtime，但还没有可供最终用户调用的完整 MCP 或 CLI 产品入口。
+当前仓库处于 MVP 开发阶段，已经具备领域内核、正式 Agent Driver、受监督 Worker Runtime 和本地 MCP stdio 控制入口。
 
 ## 当前能力
 
@@ -24,12 +24,14 @@ Agent Bridge 是运行在开发者本机的单用户、单机协作控制层，�
 - **独立验收执行**：只执行严格配置的命令合同；Tester 可请求、Reviewer 不可触发，支持超时、取消、进程树清理、输出脱敏和 Artifact 归档。
 - **显式 Driver 降级**：OpenCode 不健康或新 Run 启动失败时，只有能力检查通过并获得显式确认，才为一个新的 Run 选择 Claude；不会切换正在运行的任务。
 - **严格运行时配置**：无凭据配置只接受 OpenCode 主 Driver、Claude 降级 Driver 和独立验证命令目录；拒绝未知字段、历史 Cline 字段及凭据类字段。
+- **MCP stdio 控制接口**：提供任务/版本、关系、Context、启动、查询、反馈、审批、滚动、取消和完成工具；所有调用写入 SQLite 审计记录。
+- **有限审批与返工闭环**：Driver 权限请求绑定当前 Run/Session，结构化 finding 绑定当前 commit，同一任务版本最多返工三轮；Bridge 重启后保留审批、返工和观察事实，但不会盲目重放 Driver 副作用。
 
 ## 尚未完成的产品边界
 
 - Bridge 重启后的正式 Driver 端到端恢复尚未完成；当前只提供进程监督、Driver checkpoint 和恢复决策。
 - Artifact 自动保留期清理、磁盘配额和内容 tombstone 尚未实现；当前只清理失败/过期临时文件并提供孤儿候选预览。
-- MCP stdio、管理 CLI、HTTP API 和图形界面尚未实现。
+- 管理 CLI、HTTP API 和图形界面尚未实现；MCP 当前只支持本地 stdio。
 - MVP 只面向本地单用户、单机环境，不支持跨机器 Worker、多租户或云端控制面。
 - Bridge 不自动合并 `main`，最终集成仍由 Codex 或用户确认执行。
 
@@ -48,7 +50,7 @@ Bridge Core 只依赖版本化 Driver Protocol，不直接依赖 OpenCode、Clau
 | `packages/storage-sqlite`      | SQLite Repository、Artifact 引用索引与事务性 Outbox              | 已实现   |
 | `packages/artifacts-local`     | 本地产物存储、完整性和安全清理基础                               | 已实现   |
 | `packages/observability`       | 持久事件观察、结构化日志与遥测抽象                               | 已实现   |
-| `apps/bridge-mcp`              | Codex 面向 Bridge 的 MCP stdio 接口                              | 应用骨架 |
+| `apps/bridge-mcp`              | Codex 面向 Bridge 的 MCP stdio 接口                              | 已实现   |
 
 ## 环境要求
 
@@ -66,6 +68,15 @@ pnpm verify
 ```
 
 `pnpm verify` 依次检查格式、ESLint、TypeScript、全部 Vitest 测试和构建。默认验证不读取真实 Agent 配置，不调用真实模型，也不产生模型费用。
+
+先复制并修改严格配置与项目基线示例，再启动本地 MCP stdio Server：
+
+```bash
+pnpm build
+pnpm bridge:mcp -- --config /absolute/path/to/agent-bridge.yaml
+```
+
+配置必须包含绝对的 `project.project_baseline_path`。MCP 的 stdout 专用于协议帧；启动和稳定错误只写 stderr。运行状态、审批、返工轮次、Context 和控制调用审计保存在 `project.runtime_root/agent-bridge.sqlite`，因此 UI/IDE 不可用时仍可在下一次 MCP 连接中查询。
 
 两个正式 Driver 的 B-simulated 回归可以单独运行：
 

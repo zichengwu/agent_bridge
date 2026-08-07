@@ -33,6 +33,18 @@ const legalTransitions = [
   ["REVIEW_REQUIRED", "APPROVE_REVIEW", "READY_FOR_MERGE"],
   ["CHANGES_REQUESTED", "RESUME_CHANGES", "RUNNING"],
   ["READY_FOR_MERGE", "COMPLETE", "COMPLETED"],
+  ["WAITING_APPROVAL", "APPROVE_ACTION", "RUNNING"],
+  ["WAITING_APPROVAL", "DENY_ACTION", "RUNNING"],
+  ["WAITING_APPROVAL", "INTERRUPT", "INTERRUPTED"],
+  ["WAITING_APPROVAL", "FAIL", "FAILED"],
+  ["WAITING_APPROVAL", "CANCEL", "CANCELLED"],
+  ["VALIDATED", "START_NEW_VERSION", "DRAFT"],
+  ["INTERRUPTED", "START_NEW_VERSION", "DRAFT"],
+  ["FAILED", "START_NEW_VERSION", "DRAFT"],
+  ["CANCELLED", "START_NEW_VERSION", "DRAFT"],
+  ["REVIEW_REQUIRED", "START_NEW_VERSION", "DRAFT"],
+  ["READY_FOR_MERGE", "START_NEW_VERSION", "DRAFT"],
+  ["COMPLETED", "START_NEW_VERSION", "DRAFT"],
 ] as const satisfies readonly (readonly [TaskStatus, TaskTransitionEvent, TaskStatus])[];
 
 const legalTransitionKeys = new Set(
@@ -65,18 +77,24 @@ describe("权威 Task 状态机", () => {
     }
   });
 
-  it("终态不可再次转换，且最终状态集合稳定", () => {
+  it("终态只允许显式开始新版本，且最终状态集合稳定", () => {
     expect(TASK_FINAL_STATUSES).toEqual(["FAILED", "CANCELLED", "COMPLETED"]);
     for (const status of TASK_FINAL_STATUSES) {
       expect(isTaskFinalStatus(status)).toBe(true);
-      expect(getAllowedTaskTransitionEvents(status)).toEqual([]);
+      expect(getAllowedTaskTransitionEvents(status)).toEqual(["START_NEW_VERSION"]);
     }
     expect(isTaskFinalStatus("INTERRUPTED")).toBe(false);
   });
 
-  it("WAITING_APPROVAL 与 INTERRUPTED 不补造 PRD 未声明的出站转换", () => {
-    expect(getAllowedTaskTransitionEvents("WAITING_APPROVAL")).toEqual([]);
-    expect(getAllowedTaskTransitionEvents("INTERRUPTED")).toEqual([]);
+  it("WAITING_APPROVAL 可显式决策，INTERRUPTED 只能开始新版本", () => {
+    expect(getAllowedTaskTransitionEvents("WAITING_APPROVAL")).toEqual([
+      "APPROVE_ACTION",
+      "DENY_ACTION",
+      "INTERRUPT",
+      "FAIL",
+      "CANCEL",
+    ]);
+    expect(getAllowedTaskTransitionEvents("INTERRUPTED")).toEqual(["START_NEW_VERSION"]);
   });
 
   it("未知状态、未知领域事件和 Driver 事件均稳定拒绝", () => {
