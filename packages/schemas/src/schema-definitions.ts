@@ -218,6 +218,7 @@ const reviewFindingSchema: JsonSchema = strictObject(
     summary: nonEmptyStringSchema,
     file: pathSchema,
     line: positiveIntegerSchema,
+    expected_behavior: nonEmptyStringSchema,
   },
   ["finding_id", "severity", "summary"],
 );
@@ -675,6 +676,129 @@ const continuationSnapshotSchema = topLevelSchema(
   "A ContinuationSnapshot is immutable. Rollover timing and successor-session policy are Phase 1C concerns.",
 );
 
+const projectBaselineSchema = topLevelSchema(
+  "projectBaseline",
+  "ProjectBaseline",
+  {
+    project_id: identifierSchema,
+    baseline_version: positiveIntegerSchema,
+    content: jsonValueReference,
+    content_hash: contentHashSchema,
+    created_at: timestampSchema,
+    metadata: metadataSchema,
+  },
+  ["project_id", "baseline_version", "content", "content_hash", "created_at"],
+  "Project baselines are immutable and versioned.",
+);
+
+const approvalRequestSchema = topLevelSchema(
+  "approvalRequest",
+  "ApprovalRequest",
+  {
+    approval_id: identifierSchema,
+    task_id: identifierSchema,
+    task_version: positiveIntegerSchema,
+    run_id: identifierSchema,
+    session_id: identifierSchema,
+    kind: { type: "string", enum: ["driver_permission", "control_operation"] },
+    operation: identifierSchema,
+    request_hash: contentHashSchema,
+    status: { type: "string", enum: ["pending", "approved", "denied", "cancelled"] },
+    permission_id: identifierSchema,
+    tool_call_id: identifierSchema,
+    reason: nonEmptyStringSchema,
+    requested_at: timestampSchema,
+    decided_at: timestampSchema,
+    decided_by: { type: "string", enum: ["human", "controller"] },
+    metadata: metadataSchema,
+  },
+  [
+    "approval_id",
+    "task_id",
+    "task_version",
+    "run_id",
+    "session_id",
+    "kind",
+    "operation",
+    "request_hash",
+    "status",
+    "requested_at",
+  ],
+);
+
+const reviewCycleSchema = topLevelSchema(
+  "reviewCycle",
+  "ReviewCycle",
+  {
+    review_id: identifierSchema,
+    task_id: identifierSchema,
+    task_version: positiveIntegerSchema,
+    run_id: identifierSchema,
+    session_id: identifierSchema,
+    cycle_number: positiveIntegerSchema,
+    target_commit: gitCommitSchema,
+    findings: { type: "array", items: reviewFindingSchema, minItems: 1 },
+    feedback_id: identifierSchema,
+    status: {
+      type: "string",
+      enum: [
+        "requested",
+        "feedback_dispatched",
+        "resubmitted",
+        "verified",
+        "resolved",
+        "exhausted",
+      ],
+    },
+    candidate_commit: gitCommitSchema,
+    verification_results: { type: "array", items: verificationSummarySchema },
+    created_at: timestampSchema,
+    updated_at: timestampSchema,
+    metadata: metadataSchema,
+  },
+  [
+    "review_id",
+    "task_id",
+    "task_version",
+    "run_id",
+    "session_id",
+    "cycle_number",
+    "target_commit",
+    "findings",
+    "feedback_id",
+    "status",
+    "verification_results",
+    "created_at",
+    "updated_at",
+  ],
+);
+
+const controlInvocationSchema = topLevelSchema(
+  "controlInvocation",
+  "ControlInvocation",
+  {
+    invocation_id: identifierSchema,
+    tool_name: identifierSchema,
+    actor: strictObject(
+      {
+        kind: { type: "string", enum: ["human", "controller", "bridge", "system"] },
+        id: identifierSchema,
+      },
+      ["kind", "id"],
+    ),
+    request_hash: contentHashSchema,
+    status: { type: "string", enum: ["succeeded", "failed"] },
+    error_code: identifierSchema,
+    task_id: identifierSchema,
+    task_version: positiveIntegerSchema,
+    run_id: identifierSchema,
+    occurred_at: timestampSchema,
+    metadata: metadataSchema,
+  },
+  ["invocation_id", "tool_name", "actor", "request_hash", "status", "occurred_at"],
+  "Control invocations are immutable and contain only redacted audit facts.",
+);
+
 export const DOMAIN_SCHEMA_REGISTRY = {
   task: taskSchema,
   taskVersion: taskVersionSchema,
@@ -684,12 +808,20 @@ export const DOMAIN_SCHEMA_REGISTRY = {
   contextPackage: contextPackageSchema,
   handoffPackage: handoffPackageSchema,
   continuationSnapshot: continuationSnapshotSchema,
+  projectBaseline: projectBaselineSchema,
+  approvalRequest: approvalRequestSchema,
+  reviewCycle: reviewCycleSchema,
+  controlInvocation: controlInvocationSchema,
 } as const satisfies Readonly<Record<DomainSchemaKind, JsonSchema>>;
 
 export {
   agentSessionBindingSchema,
   contextPackageSchema,
   continuationSnapshotSchema,
+  projectBaselineSchema,
+  approvalRequestSchema,
+  reviewCycleSchema,
+  controlInvocationSchema,
   handoffPackageSchema,
   taskRelationSchema,
   taskResultSchema,

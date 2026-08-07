@@ -103,6 +103,22 @@ export function parseContinuationSnapshot(
   return parseDomainObject("continuationSnapshot", value);
 }
 
+export function parseProjectBaseline(value: unknown): DomainSchemaTypeMap["projectBaseline"] {
+  return parseDomainObject("projectBaseline", value);
+}
+
+export function parseApprovalRequest(value: unknown): DomainSchemaTypeMap["approvalRequest"] {
+  return parseDomainObject("approvalRequest", value);
+}
+
+export function parseReviewCycle(value: unknown): DomainSchemaTypeMap["reviewCycle"] {
+  return parseDomainObject("reviewCycle", value);
+}
+
+export function parseControlInvocation(value: unknown): DomainSchemaTypeMap["controlInvocation"] {
+  return parseDomainObject("controlInvocation", value);
+}
+
 export function assertTask(value: unknown): asserts value is DomainSchemaTypeMap["task"] {
   assertDomainObject("task", value);
 }
@@ -147,6 +163,30 @@ export function assertContinuationSnapshot(
   value: unknown,
 ): asserts value is DomainSchemaTypeMap["continuationSnapshot"] {
   assertDomainObject("continuationSnapshot", value);
+}
+
+export function assertProjectBaseline(
+  value: unknown,
+): asserts value is DomainSchemaTypeMap["projectBaseline"] {
+  assertDomainObject("projectBaseline", value);
+}
+
+export function assertApprovalRequest(
+  value: unknown,
+): asserts value is DomainSchemaTypeMap["approvalRequest"] {
+  assertDomainObject("approvalRequest", value);
+}
+
+export function assertReviewCycle(
+  value: unknown,
+): asserts value is DomainSchemaTypeMap["reviewCycle"] {
+  assertDomainObject("reviewCycle", value);
+}
+
+export function assertControlInvocation(
+  value: unknown,
+): asserts value is DomainSchemaTypeMap["controlInvocation"] {
+  assertDomainObject("controlInvocation", value);
 }
 
 function assertSupportedVersion(kind: DomainSchemaKind, value: unknown): void {

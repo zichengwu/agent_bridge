@@ -4,5 +4,17 @@
   "private": true,
   "type": "module",
   "exports": "./dist/index.js",
-  "types": "./dist/index.d.ts"
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "agent-bridge-mcp": "./dist/index.js"
+  },
+  "dependencies": {
+    "@agent-bridge/artifacts-local": "workspace:*",
+    "@agent-bridge/core": "workspace:*",
+    "@agent-bridge/driver-protocol": "workspace:*",
+    "@agent-bridge/schemas": "workspace:*",
+    "@agent-bridge/storage-sqlite": "workspace:*",
+    "@agent-bridge/worker-runtime": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.29.0"
+  }
 }

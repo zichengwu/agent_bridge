@@ -1,5 +1,6 @@
 export * from "./agent-run-lifecycle.js";
 export * from "./artifact-repository.js";
+export * from "./approval-policy.js";
 export * from "./content-integrity.js";
 export * from "./context-policy.js";
 export * from "./domain-events.js";
@@ -7,6 +8,7 @@ export * from "./errors.js";
 export * from "./handoff-policy.js";
 export * from "./in-memory-repository.js";
 export * from "./repository.js";
+export * from "./review-policy.js";
 export * from "./rollover-policy.js";
 export * from "./session-binding.js";
 export * from "./session-lifecycle.js";

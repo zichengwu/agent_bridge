@@ -8,6 +8,24 @@ importers:
 
   .:
     devDependencies:
+      '@agent-bridge/artifacts-local':
+        specifier: workspace:*
+        version: link:packages/artifacts-local
+      '@agent-bridge/core':
+        specifier: workspace:*
+        version: link:packages/core
+      '@agent-bridge/driver-protocol':
+        specifier: workspace:*
+        version: link:packages/driver-protocol
+      '@agent-bridge/schemas':
+        specifier: workspace:*
+        version: link:packages/schemas
+      '@agent-bridge/storage-sqlite':
+        specifier: workspace:*
+        version: link:packages/storage-sqlite
+      '@agent-bridge/worker-runtime':
+        specifier: workspace:*
+        version: link:packages/worker-runtime
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.7.0(jiti@2.7.0))
@@ -39,7 +57,29 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/coverage-v8@4.1.10)(vite@8.1.5(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
 
-  apps/bridge-mcp: {}
+  apps/bridge-mcp:
+    dependencies:
+      '@agent-bridge/artifacts-local':
+        specifier: workspace:*
+        version: link:../../packages/artifacts-local
+      '@agent-bridge/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@agent-bridge/driver-protocol':
+        specifier: workspace:*
+        version: link:../../packages/driver-protocol
+      '@agent-bridge/schemas':
+        specifier: workspace:*
+        version: link:../../packages/schemas
+      '@agent-bridge/storage-sqlite':
+        specifier: workspace:*
+        version: link:../../packages/storage-sqlite
+      '@agent-bridge/worker-runtime':
+        specifier: workspace:*
+        version: link:../../packages/worker-runtime
+      '@modelcontextprotocol/sdk':
+        specifier: 1.29.0
+        version: 1.29.0(zod@4.4.3)
 
   packages/artifacts-local:
     dependencies:

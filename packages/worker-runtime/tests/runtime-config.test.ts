@@ -86,6 +86,7 @@ function configuration() {
       id: "project-1",
       workspace_root: "/workspace/project",
       runtime_root: "/workspace/runtime",
+      project_baseline_path: "/workspace/project-baseline.json",
     },
     limits: {
       timeout_seconds: 3_600,

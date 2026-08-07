@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsc -b",
+    "bridge:mcp": "node apps/bridge-mcp/dist/index.js",
     "clean": "tsc -b --clean",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -40,6 +41,12 @@
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {
+    "@agent-bridge/artifacts-local": "workspace:*",
+    "@agent-bridge/core": "workspace:*",
+    "@agent-bridge/driver-protocol": "workspace:*",
+    "@agent-bridge/schemas": "workspace:*",
+    "@agent-bridge/storage-sqlite": "workspace:*",
+    "@agent-bridge/worker-runtime": "workspace:*",
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.20.1",
     "@vitest/coverage-v8": "^4.1.10",

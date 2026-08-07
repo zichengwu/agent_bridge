@@ -28,6 +28,10 @@ import {
   type RepositoryRecordVersion,
   type StoredDomainRecord,
   type TaskRelationQuery,
+  type TaskQuery,
+  type AgentRunQuery,
+  type ApprovalRequestQuery,
+  type ReviewCycleQuery,
 } from "@agent-bridge/core";
 import type {
   AgentSessionBinding,
@@ -88,6 +92,10 @@ const TABLES = {
   context_package: { name: "context_packages" },
   handoff_package: { name: "handoff_packages" },
   continuation_snapshot: { name: "continuation_snapshots" },
+  project_baseline: { name: "project_baselines" },
+  approval_request: { name: "approval_requests" },
+  review_cycle: { name: "review_cycles" },
+  control_invocation: { name: "control_invocations" },
 } as const satisfies Readonly<Record<DomainRecordKind, RecordTable>>;
 
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
@@ -212,6 +220,17 @@ export class SqliteDomainRepository implements DomainRepository, ArtifactReferen
     return this.getRecord("task", readIdentifier(taskId, "TASK_ID_INVALID"));
   }
 
+  async listTasks(value: TaskQuery = {}): Promise<readonly StoredDomainRecord<"task">[]> {
+    await Promise.resolve();
+    const query = readSimpleQuery(value, ["project_id", "status", "limit"]);
+    const conditions: string[] = [];
+    const parameters: Array<string | number> = [];
+    addOptionalCondition(conditions, parameters, "project_id", query.project_id);
+    addOptionalCondition(conditions, parameters, "status", query.status);
+    parameters.push(readLimit(query.limit));
+    return this.queryRecords("task", conditions, parameters, "updated_at DESC, record_id");
+  }
+
   async getTaskVersion(
     reference: TaskVersionReference,
   ): Promise<StoredDomainRecord<"task_version"> | undefined> {
@@ -220,9 +239,29 @@ export class SqliteDomainRepository implements DomainRepository, ArtifactReferen
     return this.getRecord("task_version", `${scope.task_id}:v${scope.task_version}`);
   }
 
+  async listTaskVersions(taskId: string) {
+    await Promise.resolve();
+    return this.queryRecords(
+      "task_version",
+      ["task_id = ?"],
+      [readIdentifier(taskId, "TASK_ID_INVALID"), MAX_QUERY_LIMIT],
+      "task_version, record_id",
+    );
+  }
+
   async getTaskResult(runId: string): Promise<StoredDomainRecord<"task_result"> | undefined> {
     await Promise.resolve();
     return this.getRecord("task_result", readIdentifier(runId, "RUN_ID_INVALID"));
+  }
+
+  async listTaskResults(taskId: string) {
+    await Promise.resolve();
+    return this.queryRecords(
+      "task_result",
+      ["task_id = ?"],
+      [readIdentifier(taskId, "TASK_ID_INVALID"), MAX_QUERY_LIMIT],
+      "created_at, record_id",
+    );
   }
 
   async getTaskRelation(
@@ -261,6 +300,18 @@ export class SqliteDomainRepository implements DomainRepository, ArtifactReferen
   async getAgentRun(runId: string): Promise<StoredDomainRecord<"agent_run"> | undefined> {
     await Promise.resolve();
     return this.getRecord("agent_run", readIdentifier(runId, "RUN_ID_INVALID"));
+  }
+
+  async listAgentRuns(value: AgentRunQuery = {}) {
+    await Promise.resolve();
+    const query = readSimpleQuery(value, ["task_id", "task_version", "status", "limit"]);
+    const conditions: string[] = [];
+    const parameters: Array<string | number> = [];
+    addOptionalCondition(conditions, parameters, "task_id", query.task_id);
+    addOptionalCondition(conditions, parameters, "task_version", query.task_version);
+    addOptionalCondition(conditions, parameters, "status", query.status);
+    parameters.push(readLimit(query.limit));
+    return this.queryRecords("agent_run", conditions, parameters, "updated_at, record_id");
   }
 
   async listRecoveryCandidates(
@@ -367,6 +418,67 @@ export class SqliteDomainRepository implements DomainRepository, ArtifactReferen
   ): Promise<StoredDomainRecord<"continuation_snapshot"> | undefined> {
     const snapshots = await this.listContinuationSnapshots(runId);
     return snapshots.at(-1);
+  }
+
+  async getProjectBaseline(projectId: string, baselineVersion: number) {
+    await Promise.resolve();
+    const id = readIdentifier(projectId, "PROJECT_ID_INVALID");
+    const version = readPositiveInteger(baselineVersion, "BASELINE_VERSION_INVALID");
+    return this.getRecord("project_baseline", `${id}:v${version}`);
+  }
+
+  async listProjectBaselines(projectId: string) {
+    await Promise.resolve();
+    return this.queryRecords(
+      "project_baseline",
+      ["project_id = ?"],
+      [readIdentifier(projectId, "PROJECT_ID_INVALID"), MAX_QUERY_LIMIT],
+      "baseline_version, record_id",
+    );
+  }
+
+  async getApprovalRequest(approvalId: string) {
+    await Promise.resolve();
+    return this.getRecord("approval_request", readIdentifier(approvalId, "APPROVAL_ID_INVALID"));
+  }
+
+  async listApprovalRequests(value: ApprovalRequestQuery = {}) {
+    await Promise.resolve();
+    const query = readSimpleQuery(value, ["task_id", "run_id", "status", "limit"]);
+    const conditions: string[] = [];
+    const parameters: Array<string | number> = [];
+    addOptionalCondition(conditions, parameters, "task_id", query.task_id);
+    addOptionalCondition(conditions, parameters, "run_id", query.run_id);
+    addOptionalCondition(conditions, parameters, "status", query.status);
+    parameters.push(readLimit(query.limit));
+    return this.queryRecords("approval_request", conditions, parameters, "requested_at, record_id");
+  }
+
+  async getReviewCycle(reviewId: string) {
+    await Promise.resolve();
+    return this.getRecord("review_cycle", readIdentifier(reviewId, "REVIEW_ID_INVALID"));
+  }
+
+  async listReviewCycles(value: ReviewCycleQuery) {
+    await Promise.resolve();
+    const query = readSimpleQuery(value, ["task_id", "task_version", "run_id", "limit"]);
+    if (typeof query.task_id !== "string") {
+      throw invalidQuery("REVIEW_QUERY_INVALID");
+    }
+    const conditions = ["task_id = ?"];
+    const parameters: Array<string | number> = [readIdentifier(query.task_id, "TASK_ID_INVALID")];
+    addOptionalCondition(conditions, parameters, "task_version", query.task_version);
+    addOptionalCondition(conditions, parameters, "run_id", query.run_id);
+    parameters.push(readLimit(query.limit));
+    return this.queryRecords("review_cycle", conditions, parameters, "cycle_number, record_id");
+  }
+
+  async getControlInvocation(invocationId: string) {
+    await Promise.resolve();
+    return this.getRecord(
+      "control_invocation",
+      readIdentifier(invocationId, "INVOCATION_ID_INVALID"),
+    );
   }
 
   async listDomainEvents(value: DomainEventQuery = {}): Promise<DomainEventPage> {
@@ -695,6 +807,23 @@ export class SqliteDomainRepository implements DomainRepository, ArtifactReferen
       .all() as unknown as StoredRow[];
   }
 
+  private queryRecords<K extends DomainRecordKind>(
+    kind: K,
+    conditions: readonly string[],
+    parameters: readonly (string | number)[],
+    orderBy: string,
+  ): readonly StoredDomainRecord<K>[] {
+    this.assertOpen();
+    const rows = this.database
+      .prepare(
+        `SELECT record_id, revision, value_json FROM ${TABLES[kind].name}
+         ${conditions.length === 0 ? "" : `WHERE ${conditions.join(" AND ")}`}
+         ORDER BY ${orderBy} LIMIT ?`,
+      )
+      .all(...parameters) as unknown as StoredRow[];
+    return Object.freeze(rows.map((row) => decodeStoredRow(kind, row)));
+  }
+
   private readMaximumEventSequence(): number {
     const row = this.database
       .prepare("SELECT COALESCE(MAX(sequence), 0) AS maximum FROM domain_events")
@@ -842,6 +971,44 @@ function projectRecord(
         snapshot_version: record.snapshot_version,
         run_id: record.run_id,
         created_at: record.created_at,
+      };
+    }
+    case "project_baseline": {
+      const record = value as DomainRecordValueMap["project_baseline"];
+      return {
+        project_id: record.project_id,
+        baseline_version: record.baseline_version,
+        created_at: record.created_at,
+      };
+    }
+    case "approval_request": {
+      const record = value as DomainRecordValueMap["approval_request"];
+      return {
+        task_id: record.task_id,
+        task_version: record.task_version,
+        run_id: record.run_id,
+        status: record.status,
+        requested_at: record.requested_at,
+      };
+    }
+    case "review_cycle": {
+      const record = value as DomainRecordValueMap["review_cycle"];
+      return {
+        task_id: record.task_id,
+        task_version: record.task_version,
+        run_id: record.run_id,
+        cycle_number: record.cycle_number,
+        status: record.status,
+        updated_at: record.updated_at,
+      };
+    }
+    case "control_invocation": {
+      const record = value as DomainRecordValueMap["control_invocation"];
+      return {
+        tool_name: record.tool_name,
+        task_id: record.task_id ?? null,
+        run_id: record.run_id ?? null,
+        occurred_at: record.occurred_at,
       };
     }
   }
@@ -1042,6 +1209,40 @@ function readArtifactReferenceQuery(
     ...(value.source_kind === undefined ? {} : { source_kind: value.source_kind }),
     limit: readLimit(value.limit),
   });
+}
+
+function readSimpleQuery(
+  value: unknown,
+  allowed: readonly string[],
+): Readonly<Record<string, unknown>> {
+  if (!isPlainRecord(value) || !hasOnlyKeys(value, allowed)) {
+    throw invalidQuery("QUERY_INVALID");
+  }
+  for (const field of ["project_id", "task_id", "run_id", "status"] as const) {
+    if (value[field] !== undefined && !isIdentifier(value[field])) {
+      throw invalidQuery("QUERY_INVALID");
+    }
+  }
+  if (value.task_version !== undefined && !isPositiveInteger(value.task_version)) {
+    throw invalidQuery("QUERY_INVALID");
+  }
+  return value;
+}
+
+function addOptionalCondition(
+  conditions: string[],
+  parameters: Array<string | number>,
+  column: string,
+  value: unknown,
+): void {
+  if (value === undefined) {
+    return;
+  }
+  if (typeof value !== "string" && typeof value !== "number") {
+    throw invalidQuery("QUERY_INVALID");
+  }
+  conditions.push(`${column} = ?`);
+  parameters.push(value);
 }
 
 function readEventCursor(value: unknown, maximum: number): number {

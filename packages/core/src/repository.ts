@@ -7,6 +7,10 @@ import {
   parseTaskRelation,
   parseTaskResult,
   parseTaskVersion,
+  parseProjectBaseline,
+  parseApprovalRequest,
+  parseReviewCycle,
+  parseControlInvocation,
   type AgentRole,
   type AgentSessionBinding,
   type ContextPackage,
@@ -19,6 +23,11 @@ import {
   type TaskResult,
   type TaskVersion,
   type TaskVersionReference,
+  type ProjectBaseline,
+  type ApprovalRequest,
+  type ReviewCycle,
+  type ControlInvocation,
+  type TaskStatus,
 } from "@agent-bridge/schemas";
 
 import {
@@ -48,6 +57,8 @@ export const IMMUTABLE_DOMAIN_RECORD_KINDS = [
   "context_package",
   "handoff_package",
   "continuation_snapshot",
+  "project_baseline",
+  "control_invocation",
 ] as const satisfies readonly DomainRecordKind[];
 
 export const RECOVERABLE_AGENT_RUN_STATUSES = [
@@ -83,6 +94,10 @@ export interface DomainRecordValueMap {
   readonly context_package: ContextPackage;
   readonly handoff_package: HandoffPackage;
   readonly continuation_snapshot: ContinuationSnapshot;
+  readonly project_baseline: ProjectBaseline;
+  readonly approval_request: ApprovalRequest;
+  readonly review_cycle: ReviewCycle;
+  readonly control_invocation: ControlInvocation;
 }
 
 export type DomainRecordWrite = {
@@ -153,18 +168,49 @@ export interface RecoveryCandidateQuery {
   readonly limit?: number;
 }
 
+export interface TaskQuery {
+  readonly project_id?: string;
+  readonly status?: TaskStatus;
+  readonly limit?: number;
+}
+
+export interface AgentRunQuery {
+  readonly task_id?: string;
+  readonly task_version?: number;
+  readonly status?: AgentRunStatus;
+  readonly limit?: number;
+}
+
+export interface ApprovalRequestQuery {
+  readonly task_id?: string;
+  readonly run_id?: string;
+  readonly status?: ApprovalRequest["status"];
+  readonly limit?: number;
+}
+
+export interface ReviewCycleQuery {
+  readonly task_id: string;
+  readonly task_version?: number;
+  readonly run_id?: string;
+  readonly limit?: number;
+}
+
 export interface DomainRepository {
   commit(request: DomainWriteRequest): Promise<DomainWriteResult>;
   getTask(taskId: string): Promise<StoredDomainRecord<"task"> | undefined>;
+  listTasks(query?: TaskQuery): Promise<readonly StoredDomainRecord<"task">[]>;
   getTaskVersion(
     reference: TaskVersionReference,
   ): Promise<StoredDomainRecord<"task_version"> | undefined>;
+  listTaskVersions(taskId: string): Promise<readonly StoredDomainRecord<"task_version">[]>;
   getTaskResult(runId: string): Promise<StoredDomainRecord<"task_result"> | undefined>;
+  listTaskResults(taskId: string): Promise<readonly StoredDomainRecord<"task_result">[]>;
   getTaskRelation(relationId: string): Promise<StoredDomainRecord<"task_relation"> | undefined>;
   listTaskRelations(
     query: TaskRelationQuery,
   ): Promise<readonly StoredDomainRecord<"task_relation">[]>;
   getAgentRun(runId: string): Promise<StoredDomainRecord<"agent_run"> | undefined>;
+  listAgentRuns(query?: AgentRunQuery): Promise<readonly StoredDomainRecord<"agent_run">[]>;
   listRecoveryCandidates(
     query?: RecoveryCandidateQuery,
   ): Promise<readonly StoredDomainRecord<"agent_run">[]>;
@@ -194,6 +240,24 @@ export interface DomainRepository {
   getLatestContinuationSnapshot(
     runId: string,
   ): Promise<StoredDomainRecord<"continuation_snapshot"> | undefined>;
+  getProjectBaseline(
+    projectId: string,
+    baselineVersion: number,
+  ): Promise<StoredDomainRecord<"project_baseline"> | undefined>;
+  listProjectBaselines(
+    projectId: string,
+  ): Promise<readonly StoredDomainRecord<"project_baseline">[]>;
+  getApprovalRequest(
+    approvalId: string,
+  ): Promise<StoredDomainRecord<"approval_request"> | undefined>;
+  listApprovalRequests(
+    query?: ApprovalRequestQuery,
+  ): Promise<readonly StoredDomainRecord<"approval_request">[]>;
+  getReviewCycle(reviewId: string): Promise<StoredDomainRecord<"review_cycle"> | undefined>;
+  listReviewCycles(query: ReviewCycleQuery): Promise<readonly StoredDomainRecord<"review_cycle">[]>;
+  getControlInvocation(
+    invocationId: string,
+  ): Promise<StoredDomainRecord<"control_invocation"> | undefined>;
   listDomainEvents(query?: DomainEventQuery): Promise<DomainEventPage>;
 }
 
@@ -403,6 +467,16 @@ export function getDomainRecordId<K extends DomainRecordKind>(
       const snapshot = value as ContinuationSnapshot;
       return `${snapshot.snapshot_id}:v${snapshot.snapshot_version}`;
     }
+    case "project_baseline": {
+      const baseline = value as ProjectBaseline;
+      return `${baseline.project_id}:v${baseline.baseline_version}`;
+    }
+    case "approval_request":
+      return (value as ApprovalRequest).approval_id;
+    case "review_cycle":
+      return (value as ReviewCycle).review_id;
+    case "control_invocation":
+      return (value as ControlInvocation).invocation_id;
   }
 }
 
@@ -436,6 +510,14 @@ function creationEventType(kind: DomainRecordKind): AuthoritativeDomainEventType
       return "handoff_package.recorded";
     case "continuation_snapshot":
       return "continuation_snapshot.recorded";
+    case "project_baseline":
+      return "project_baseline.recorded";
+    case "approval_request":
+      return "approval_request.recorded";
+    case "review_cycle":
+      return "review_cycle.recorded";
+    case "control_invocation":
+      return "control_invocation.recorded";
   }
 }
 
@@ -447,6 +529,10 @@ function updateEventTypes(kind: DomainRecordKind): readonly AuthoritativeDomainE
       return ["agent_run.status_changed"];
     case "agent_session_binding":
       return ["agent_session_binding.status_changed"];
+    case "approval_request":
+      return ["approval_request.status_changed"];
+    case "review_cycle":
+      return ["review_cycle.status_changed"];
     default:
       return [];
   }
@@ -494,6 +580,14 @@ function readDomainRecordValue<K extends DomainRecordKind>(
         return parseHandoffPackage(value) as DomainRecordValueMap[K];
       case "continuation_snapshot":
         return parseContinuationSnapshot(value) as DomainRecordValueMap[K];
+      case "project_baseline":
+        return parseProjectBaseline(value) as DomainRecordValueMap[K];
+      case "approval_request":
+        return parseApprovalRequest(value) as DomainRecordValueMap[K];
+      case "review_cycle":
+        return parseReviewCycle(value) as DomainRecordValueMap[K];
+      case "control_invocation":
+        return parseControlInvocation(value) as DomainRecordValueMap[K];
     }
   } catch (error) {
     if (error instanceof CoreDomainError && error.code === "REPOSITORY_WRITE_INVALID") {
