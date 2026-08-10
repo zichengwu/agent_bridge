@@ -546,8 +546,8 @@ export class ClaudeAgentDriver implements AgentDriver {
             text: output,
           },
           artifacts: [],
-          usage: record.tokenUsage,
-          error: event.type === "run.failed" ? event.error : undefined,
+          ...(record.tokenUsage === undefined ? {} : { usage: record.tokenUsage }),
+          ...(event.type === "run.failed" ? { error: event.error } : {}),
           completedAt: event.occurredAt,
         };
         record.events.close();

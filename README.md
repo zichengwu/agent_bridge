@@ -4,7 +4,7 @@ Agent Bridge 是运行在开发者本机的单用户、单机协作控制层，�
 
 它不共享 Agent 的完整聊天记录或内部思考，而是通过版本化任务合同、Session 绑定、权限策略、独立 Git worktree 和结构化 Handoff，让不同 Agent 在明确边界内协作。Codex 负责需求、架构、审查和最终集成；受管 Code Agent 负责开发、测试、审查、文档或研究等执行任务；Git 与可重复验证命令作为代码和质量结果的权威来源。
 
-当前仓库处于 MVP 开发阶段，已经具备领域内核、正式 Agent Driver、受监督 Worker Runtime 和本地 MCP stdio 控制入口。
+Phase 4 已完成；当前进入 **Phase 4.1：真实可用性验收与运行闭环**。仓库已经具备领域内核、正式 Agent Driver、受监督 Worker Runtime、本地 MCP stdio 控制入口，以及严格 Provider/凭据注入、启动诊断和正式 loopback E2E。
 
 ## 当前能力
 
@@ -23,7 +23,9 @@ Agent Bridge 是运行在开发者本机的单用户、单机协作控制层，�
 - **运行期 Context 与 Handoff**：从 Repository、Git 和验证 Artifact 的权威事实组装 Context，并生成确定、可校验且经过敏感信息扫描的 Handoff。
 - **独立验收执行**：只执行严格配置的命令合同；Tester 可请求、Reviewer 不可触发，支持超时、取消、进程树清理、输出脱敏和 Artifact 归档。
 - **显式 Driver 降级**：OpenCode 不健康或新 Run 启动失败时，只有能力检查通过并获得显式确认，才为一个新的 Run 选择 Claude；不会切换正在运行的任务。
-- **严格运行时配置**：无凭据配置只接受 OpenCode 主 Driver、Claude 降级 Driver 和独立验证命令目录；拒绝未知字段、历史 Cline 字段及凭据类字段。
+- **严格运行时配置**：公开 `schema_version: 2` 只允许非敏感 Provider 配置和显式凭据来源；拒绝未知字段、历史 Cline 字段、秘密值和凭据参数。
+- **Driver 专属凭据注入**：OpenCode 仅接收 `AGENT_BRIDGE_OPENCODE_API_KEY`，Claude 仅接收 `AGENT_BRIDGE_CLAUDE_AUTH_TOKEN`；Bridge 不透传完整父环境，秘密不进入 Driver Protocol JSONL。
+- **启动诊断与哈希工具**：最小只读入口检查配置、Git、目录、Driver/runtime executable、权限和 Provider 完整性，并确定性生成任务合同 `content_hash`；它不是 FR-012 通用管理 CLI。
 - **MCP stdio 控制接口**：提供任务/版本、关系、Context、启动、查询、反馈、审批、滚动、取消和完成工具；所有调用写入 SQLite 审计记录。
 - **有限审批与返工闭环**：Driver 权限请求绑定当前 Run/Session，结构化 finding 绑定当前 commit，同一任务版本最多返工三轮；Bridge 重启后保留审批、返工和观察事实，但不会盲目重放 Driver 副作用。
 - **可靠恢复与交付审计**：Driver 事件生成脱敏 Artifact checkpoint；重启时复核 Session、worktree、租约、Git 和权限范围后恢复同一 Run，否则持久化中断原因并保留部分文件。Outbox 随应用生命周期重放，终态资源释放写入审计。
@@ -31,7 +33,7 @@ Agent Bridge 是运行在开发者本机的单用户、单机协作控制层，�
 ## 尚未完成的产品边界
 
 - Artifact 自动保留期清理、磁盘配额和内容 tombstone 尚未实现；当前只清理失败/过期临时文件并提供孤儿候选预览。
-- 管理 CLI、HTTP API 和图形界面尚未实现；MCP 当前只支持本地 stdio。
+- FR-012 通用管理 CLI、HTTP API 和图形界面尚未实现；preflight/content-hash 是启动辅助工具，不承担任务管理。
 - MVP 只面向本地单用户、单机环境，不支持跨机器 Worker、多租户或云端控制面。
 - Bridge 不自动合并 `main`，最终集成仍由 Codex 或用户确认执行。
 
@@ -69,14 +71,35 @@ pnpm verify
 
 `pnpm verify` 依次检查格式、ESLint、TypeScript、全部 Vitest 测试和构建。默认验证不读取真实 Agent 配置，不调用真实模型，也不产生模型费用。
 
-先复制并修改严格配置与项目基线示例，再启动本地 MCP stdio Server：
+先复制并修改严格配置与项目基线示例，构建并运行只读诊断：
 
 ```bash
 pnpm build
+pnpm bridge:preflight -- /absolute/path/to/agent-bridge.yaml
+pnpm bridge:content-hash -- /absolute/path/to/task-contract.json
 pnpm bridge:mcp -- --config /absolute/path/to/agent-bridge.yaml
 ```
 
-配置必须包含绝对的 `project.project_baseline_path`。MCP 的 stdout 专用于协议帧；启动和稳定错误只写 stderr。运行状态、审批、返工轮次、Context 和控制调用审计保存在 `project.runtime_root/agent-bridge.sqlite`，因此 UI/IDE 不可用时仍可在下一次 MCP 连接中查询。
+配置必须符合 [`config/agent-bridge.schema.json`](config/agent-bridge.schema.json)，并包含绝对的 `project.project_baseline_path`。Provider 的 base URL、model、权限和预算可以版本化；Token/API Key/Cookie/登录态不得写入配置。环境注入和严格 JSON 凭据文件的完整规则见中文指南。
+
+Codex/ChatGPT Desktop 的 stdio MCP 注册示例（将所有路径替换为本机绝对路径）：
+
+```toml
+[mcp_servers.agent_bridge]
+command = "/absolute/path/to/node"
+args = [
+  "/absolute/path/to/agent_bridge/apps/bridge-mcp/dist/index.js",
+  "--config",
+  "/absolute/path/to/agent-bridge.yaml",
+]
+cwd = "/absolute/path/to/agent_bridge"
+env_vars = ["AGENT_BRIDGE_OPENCODE_API_KEY", "AGENT_BRIDGE_CLAUDE_AUTH_TOKEN"]
+startup_timeout_sec = 30
+tool_timeout_sec = 3600
+required = true
+```
+
+这里只转发变量名，不在 TOML 中写变量值。Codex 当前的 stdio MCP 配置字段以[官方 MCP 文档](https://developers.openai.com/codex/mcp/)为准。MCP 的 stdout 专用于协议帧；启动和稳定错误只写 stderr。
 
 两个正式 Driver 的 B-simulated 回归可以单独运行：
 
@@ -87,12 +110,21 @@ pnpm test:driver-claude-agent:b-simulated
 
 B-simulated 使用临时隔离环境、一次性 Git worktree、合成 Token 和仅监听 `127.0.0.1` 的模拟 Provider，用于验证正式 Driver 的 Session、权限、取消、恢复、Git 和清理边界；它不等同于真实 Provider 验证。
 
+在禁止嵌套 `sandbox-exec` 的 macOS 宿主中，`pnpm spike:drivers:b:preflight` 会以 `B_LAYER_NETWORK_SANDBOX_NESTING_DENIED` 提前停止，历史 B-simulated 文件会明确跳过，避免把宿主 `EPERM`/code 126 误报为产品失败；请在未被上层沙箱包裹的 macOS 终端运行该门禁。Phase 4.1 正式产品路径仍通过以下不依赖嵌套沙箱的完整 loopback E2E 验证：
+
+```bash
+pnpm test:e2e:phase4.1
+```
+
+该 E2E 覆盖 Service → Bridge → 正式 stdio Worker → 正式 OpenCode Runtime → loopback Provider → worktree 修改 → 权限审批 → 独立验证 → Review/完成，以及 Bridge 重启恢复、取消、SQLite/Artifact 脱敏和零真实 Provider 请求。
+
 任何真实 Provider 验证都必须单独获得费用与凭据授权。OpenCode 与 Claude Agent SDK 当前共用 DeepSeek，因此只提供 Driver 级降级，不构成 Provider 级灾备。
 
 ## 文档
 
 - [产品需求与验收基线](docs/prd/agent-bridge-prd.md)
 - [MVP Agent Driver 选型 ADR](docs/adr/0001-agent-driver-selection.md)
+- [Provider 配置与凭据边界 ADR](docs/adr/0002-provider-credentials.md)
 - [中文使用指南](docs/guide/agent-bridge-usage.zh-CN.md)
 - [最小示例项目](examples/minimal-project/README.md)
 - [Cline SDK/Hub 历史 Spike](docs/spikes/cline-sdk-hub.md)

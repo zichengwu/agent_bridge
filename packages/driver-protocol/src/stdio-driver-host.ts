@@ -22,6 +22,7 @@ export interface StdioDriverHostOptions {
   readonly output: Writable;
   readonly diagnostics?: Writable;
   readonly factory: DriverHostFactory;
+  readonly redactError?: (value: string) => string;
   readonly maxLineBytes?: number;
 }
 
@@ -59,6 +60,7 @@ export async function runStdioDriverHost(options: StdioDriverHostOptions): Promi
             "DRIVER_TRANSPORT_REQUEST_DUPLICATE",
             "Driver transport request ID was already used",
           ),
+          options.redactError,
         );
         continue;
       }
@@ -90,7 +92,7 @@ export async function runStdioDriverHost(options: StdioDriverHostOptions): Promi
           break;
         }
       } catch (error) {
-        await writeFailure(options.output, value.requestId, error);
+        await writeFailure(options.output, value.requestId, error, options.redactError);
       }
     }
   } finally {
@@ -213,9 +215,14 @@ async function writeSuccess(output: Writable, requestId: string, result: JsonVal
   });
 }
 
-async function writeFailure(output: Writable, requestId: string, error: unknown): Promise<void> {
+async function writeFailure(
+  output: Writable,
+  requestId: string,
+  error: unknown,
+  redact: (value: string) => string = (value) => value,
+): Promise<void> {
   const code = readErrorCode(error);
-  const message = error instanceof Error ? error.message : "Driver request failed";
+  const message = redact(error instanceof Error ? error.message : "Driver request failed");
   await writeJsonLine(output, {
     kind: "response",
     transportVersion: DRIVER_TRANSPORT_VERSION,

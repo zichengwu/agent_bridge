@@ -1,7 +1,9 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { promisify } from "node:util";
 
 import { computeDocumentContentHash } from "@agent-bridge/core";
 import { DOMAIN_SCHEMA_VERSION } from "@agent-bridge/schemas";
@@ -10,6 +12,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { afterEach, describe, expect, it } from "vitest";
 
 const transports: StdioClientTransport[] = [];
+const execFileAsync = promisify(execFile);
 
 afterEach(async () => {
   await Promise.allSettled(transports.splice(0).map((transport) => transport.close()));
@@ -18,14 +21,17 @@ afterEach(async () => {
 describe("Agent Bridge MCP stdio Server", () => {
   it("通过真实 stdio 握手暴露严格工具，并可在没有 UI/IDE 时查询持久化任务", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "agent-bridge-mcp-"));
+    const workspace = resolve(root, "workspace");
     const runtimeRoot = resolve(root, "runtime");
     const baselinePath = resolve(root, "baseline.json");
     const configPath = resolve(root, "agent-bridge.yaml");
+    await mkdir(workspace);
+    await execFileAsync("/usr/bin/git", ["init", workspace]);
     await writeFile(
       baselinePath,
       JSON.stringify({ baseline_version: 1, content: { policy: "test-only" } }),
     );
-    await writeFile(configPath, configuration(root, runtimeRoot, baselinePath));
+    await writeFile(configPath, configuration(workspace, runtimeRoot, baselinePath));
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [resolve(process.cwd(), "apps/bridge-mcp/dist/index.js"), "--config", configPath],

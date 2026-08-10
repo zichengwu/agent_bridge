@@ -15,13 +15,21 @@ export interface OpenCodeWorkerEntryOptions {
 }
 
 export function runOpenCodeWorker(options: OpenCodeWorkerEntryOptions = {}): Promise<void> {
+  const secret = process.env.AGENT_BRIDGE_OPENCODE_API_KEY;
   return runStdioDriverHost({
     hostId: "opencode-worker",
     input: options.input ?? process.stdin,
     output: options.output ?? process.stdout,
     diagnostics: options.diagnostics ?? process.stderr,
     factory: options.factory ?? createOpenCodeWorkerFactory(),
+    redactError: (value) => redactPrivateValue(value, secret),
   });
+}
+
+function redactPrivateValue(value: string, secret: string | undefined): string {
+  return secret === undefined || secret.length === 0
+    ? value
+    : value.replaceAll(secret, "[REDACTED]");
 }
 
 if (isMainModule()) {

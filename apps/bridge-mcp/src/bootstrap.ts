@@ -16,6 +16,7 @@ import {
   ContextHandoffRuntime,
   DefaultGitClient,
   loadRuntimeConfiguration,
+  runRuntimePreflight,
 } from "@agent-bridge/worker-runtime";
 
 import { BridgeControlService } from "./bridge-control-service.js";
@@ -31,6 +32,7 @@ export interface BridgeApplication {
 
 export async function bootstrapBridgeApplication(configPath: string): Promise<BridgeApplication> {
   const configuration = await loadRuntimeConfiguration(configPath);
+  await runRuntimePreflight(configuration);
   await mkdir(configuration.project.runtime_root, { recursive: true });
   const repository = new SqliteDomainRepository({
     database_path: resolve(configuration.project.runtime_root, "agent-bridge.sqlite"),

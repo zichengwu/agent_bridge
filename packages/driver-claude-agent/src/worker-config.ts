@@ -14,6 +14,8 @@ import type {
 } from "./config.js";
 import { createClaudeAgentDriver, type ClaudeAgentDriverRecoveryState } from "./driver.js";
 
+const CLAUDE_CREDENTIAL_ENV = "AGENT_BRIDGE_CLAUDE_AUTH_TOKEN";
+
 export interface ClaudeWorkerConfiguration {
   readonly isolation: ClaudeAgentIsolationConfiguration;
   readonly provider?: Pick<ClaudeAgentProviderConfiguration, "baseUrl" | "model">;
@@ -28,19 +30,19 @@ export function createClaudeWorkerFactory(
   return {
     create(initialization) {
       const configuration = readClaudeWorkerConfiguration(initialization.configuration);
+      const secret = environment[CLAUDE_CREDENTIAL_ENV];
+      if (
+        (configuration.provider === undefined) !==
+        (secret === undefined || secret.length === 0)
+      ) {
+        throw invalidConfiguration();
+      }
       const provider: ClaudeAgentProviderConfiguration | undefined =
-        configuration.provider === undefined &&
-        environment.ANTHROPIC_AUTH_TOKEN === undefined &&
-        environment.ANTHROPIC_API_KEY === undefined
+        configuration.provider === undefined && secret === undefined
           ? undefined
           : {
               ...configuration.provider,
-              ...(environment.ANTHROPIC_AUTH_TOKEN === undefined
-                ? {}
-                : { authToken: environment.ANTHROPIC_AUTH_TOKEN }),
-              ...(environment.ANTHROPIC_API_KEY === undefined
-                ? {}
-                : { apiKey: environment.ANTHROPIC_API_KEY }),
+              ...(secret === undefined ? {} : { authToken: secret }),
             };
       return Promise.resolve(
         createClaudeAgentDriver({

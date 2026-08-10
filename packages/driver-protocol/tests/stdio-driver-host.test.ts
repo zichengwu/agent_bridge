@@ -57,6 +57,42 @@ describe("stdio Driver Host", () => {
       { kind: "response", requestId: "request-stop", ok: true },
     ]);
   });
+
+  it("在错误进入 Driver Protocol JSONL 前调用宿主脱敏器", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const host = runStdioDriverHost({
+      hostId: "test-worker",
+      input,
+      output,
+      factory: {
+        create: () =>
+          Promise.resolve({
+            ...fakeDriver(),
+            healthCheck: () => Promise.reject(new Error("failure included synthetic-secret")),
+          }),
+      },
+      redactError: (value) => value.replaceAll("synthetic-secret", "[REDACTED]"),
+    });
+
+    input.write(
+      `${JSON.stringify(request("request-init", "initialize", { workDirectory: "/tmp/worktree" }))}\n`,
+    );
+    input.write(`${JSON.stringify(request("request-health", "healthCheck", {}))}\n`);
+    input.write(`${JSON.stringify(request("request-stop", "shutdown", {}))}\n`);
+    input.end();
+    await host;
+    output.end();
+
+    const messages: unknown[] = [];
+    for await (const message of readJsonLines(output)) messages.push(message);
+    expect(JSON.stringify(messages)).not.toContain("synthetic-secret");
+    expect(messages.at(-2)).toMatchObject({
+      requestId: "request-health",
+      ok: false,
+      error: { message: "failure included [REDACTED]" },
+    });
+  });
 });
 
 function request(requestId: string, method: string, params: object) {

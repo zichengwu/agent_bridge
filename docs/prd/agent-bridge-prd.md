@@ -3,16 +3,16 @@
 ## 0. 文档状态
 
 - PRD 标识：`PRD-AGENT-BRIDGE-001`
-- 版本：`v1.3`
-- 状态：研发就绪
+- 版本：`v1.4`
+- 状态：Phase 4 已完成；Phase 4.1 真实可用性验收进行中
 - 文档深度：完整 PRD
 - 负责人：待指定
-- 最近更新：2026-07-22
+- 最近更新：2026-08-11
 - 目标版本：MVP
 - 基线或关联提交：暂无
 - 替代版本：`v1.2`
 - 关联原型：不适用；MVP 为本地 Harness 和控制接口，不包含图形界面
-- 本次主要变更：完成 Agent Driver 统一选型门禁；确定 OpenCode 为 MVP 主 Driver、Claude Agent SDK 为 MVP 降级 Driver；记录两者共用 DeepSeek 的 Provider 故障域、Codex SDK B 层延期和真实 Provider 测试的持续授权边界
+- 本次主要变更：校正 Phase 1～4 已完成状态；进入 Phase 4.1，补齐严格非敏感 Provider 配置、Driver 专属凭据注入、启动诊断、Codex MCP 注册和正式 loopback 完整 E2E；FR-012 仍为非阻塞通用管理 CLI
 
 ### 0.1 来源状态说明
 
@@ -36,10 +36,10 @@
 
 当前判断：
 
-- 当前阶段：领域内核与正式 Agent Driver 均具备研发条件；具体 Driver 必须继续保持进程外隔离和协议边界。
+- 当前阶段：Phase 4 已完成；Phase 4.1 正在验证真实日常可用性和运行闭环，具体 Driver 继续保持进程外隔离和协议边界。
 - 目标交付与 PRD 深度：完整 PRD。
 - 最大不确定性：两个已选 Driver 共用 DeepSeek 的 Provider 故障域，以及正式 Driver Contract 与 Spike 事件映射的一致性；必须通过 Contract 测试和默认无费用的兼容性测试持续约束。
-- 下一步：基于 `v1.3` 固化正式 Driver Contract、能力声明和事件映射，再实现独立 OpenCode Driver 与 Claude Agent Driver 包。
+- 下一步：完成 Phase 4.1 无凭据交付门禁；真实 Provider 验收必须另行授权，不能由 B-simulated 或集成模拟替代。
 
 ## 1. 执行摘要
 
@@ -176,7 +176,7 @@ Git + CI 或本地验证
 | 语言与运行时 | Node.js 22+、TypeScript | 核心继续使用 TypeScript；特殊 Worker 可独立使用 Go/Rust |
 | 工程组织 | pnpm monorepo | 保持包边界和独立发布能力 |
 | Codex 接口 | MCP stdio | Streamable HTTP MCP 与远程认证 |
-| 管理接口 | 本地 CLI；HTTP/JSON + OpenAPI 作为预留适配器 | API Gateway、OIDC 和团队权限 |
+| 管理接口 | MCP stdio；只读 preflight/content-hash 启动辅助入口 | FR-012 通用管理 CLI、HTTP/JSON + OpenAPI、API Gateway、OIDC 和团队权限 |
 | Agent Driver | 版本化 JSON Schema；本地 JSON-RPC/JSONL over stdio | WebSocket 或 gRPC 远程 Worker 协议 |
 | Agent 接入 | OpenCode 主 Driver + Claude Agent SDK 降级 Driver；具体 SDK、Server 或 CLI 只存在于独立 Driver 子进程 | 远程 Driver、更多 Provider 与独立 Worker 服务 |
 | 本地存储 | SQLite，通过 Repository 接口访问 | PostgreSQL |
@@ -448,7 +448,8 @@ Driver 必须返回可持久化的外部 Session ID，并声明是否支持精�
 - 来源：为 MCP 或适配器异常提供人工兜底。
 - 优先级：Should
 - 主要行为：提供任务列表、详情、事件、重试、取消和清理命令。
-- 交付边界：不属于 `v1.3` MVP 阻塞验收；不得与具体 Agent 的 CLI 降级 Driver 混为同一功能。
+- 交付边界：不属于 `v1.4` Phase 4.1 阻塞验收；不得与具体 Agent 的 CLI 降级 Driver 混为同一功能。
+- 澄清：Phase 4.1 的 preflight 与 content-hash 是窄范围、只读启动辅助入口，不提供任务列表、重试、取消或清理，因此不代表 FR-012 已实现。
 
 ### FR-013：审计与脱敏
 
@@ -1184,6 +1185,8 @@ agent-bridge/
 - 反馈和返工循环。
 - 端到端测试。
 
+状态：已完成。`fd3537b` / PR #6 已交付 MCP stdio 生命周期、任务控制、审批/反馈、持久查询和重启观察自动化证据。
+
 ### Phase 4：可靠性与文档
 
 - 幂等和租约。
@@ -1191,13 +1194,27 @@ agent-bridge/
 - 日志脱敏。
 - 示例项目、与正式 Driver/权限模型一致的配置样例和中文使用文档。
 
+状态：已完成。`4b89e5d` / PR #7 已交付恢复、Outbox、脱敏、清理审计、无凭据 E2E 和交付材料，并合并到 `main@dbc2b11`。
+
+### Phase 4.1：真实可用性验收与运行闭环
+
+- 严格、版本化的非敏感 Provider 配置和公开运行时 Schema。
+- Driver 专属 allowlist 环境变量与可选安全 JSON 凭据文件；秘密不得进入 JSONL、SQLite、Artifact、事件、日志、错误详情或 argv。
+- 启动前配置/Git/目录/可执行权限/Provider 完整性诊断与确定性 `content_hash`。
+- Codex MCP 注册、精确 Driver bin、完整任务流程和安全配置示例。
+- Service → Bridge → 正式 stdio Worker → 正式 Driver Runtime → loopback Provider → worktree → 权限审批 → 独立验证 → Review/完成，以及重启恢复与取消。
+- B-simulated、Phase 4.1 集成模拟和真实 Provider 验收分别报告，禁止互相替代。
+
+状态：进行中；代码与无凭据 E2E 已具备，待完整交付门禁与真实 Provider 的另行授权验收。
+
 ## 22. 风险、假设与验证计划
 
 | 类型 | 内容 | 影响 | 状态 | 验证方式 |
 |---|---|---|---|---|
 | 技术 | 候选 Agent 的 Session、事件、取消或权限能力可能不足 | 影响 Driver 选择和适配设计 | 已验证 | OpenCode 与 Claude Agent SDK 已通过 A 层、B-simulated 和 B-real 适用硬门禁；正式实现继续运行 Contract 测试 |
 | 可用性 | OpenCode 与 Claude Agent SDK 共用 DeepSeek Provider 故障域 | Provider 故障时主/降级 Driver 可能同时不可用 | 已接受缺口 | MVP 明确仅提供 Driver 级降级；后续通过 Driver Protocol 接入独立 Provider 灾备 |
-| 技术 | Codex MCP 与本地 Bridge 的进程生命周期需验证 | 影响启动和恢复 | 待验证 | 最小 MCP PoC |
+| 技术 | Codex MCP 与本地 Bridge 的进程生命周期 | 影响启动和恢复 | 已验证 | Phase 3/4 MCP stdio、持久恢复与 Phase 4.1 正式 Driver loopback E2E；真实 Provider 仍需另行授权 |
+| 可用性 | macOS 嵌套 `sandbox-exec` 可能返回 EPERM/code 126 | 影响历史 B-simulated Harness | 已定位 | 启动诊断检查正式 executable；宿主探针失败时明确跳过嵌套 Harness，并由不嵌套沙箱的正式产品 loopback E2E 验证运行路径 |
 | 安全 | 路径规则可能被符号链接绕过 | 产生越权写入 | 已识别 | 规范化路径并做逃逸测试 |
 | 一致性 | 多 Agent 可能争用同一文件 | 产生冲突和覆盖 | 已识别 | 路径 Owner、租约和 diff 校验 |
 | 运营 | 本机资源不足时并发 Agent 影响开发体验 | 性能下降 | 待验证 | 配置并发上限并记录资源情况 |
@@ -1286,7 +1303,7 @@ agent-bridge/
 - [x] Project Baseline、Context Package、Handoff、任务关系和陈旧依赖规则已确认。
 - [x] 核心流程、权限、状态、规则、数据契约、异常和验收行为可追溯。
 
-当前结论：PRD 更新为 `v1.3 / 研发就绪`基线。领域内核、Schema、状态机、隔离、存储、MCP 边界和正式 Agent Driver 均可继续研发；OQ-002 已关闭。OQ-003 与 FR-012 仍为非阻塞后续项。
+当前结论：PRD 更新为 `v1.4 / Phase 4.1 进行中`。Phase 1～4 已完成；严格 Provider/凭据闭环、启动诊断、Codex MCP 注册和正式 loopback E2E 已进入验收。OQ-003 与 FR-012 仍为非阻塞后续项，真实 Provider 验收保持独立授权边界。
 
 ## 26. 新研发任务启动指令
 
@@ -1297,9 +1314,9 @@ agent-bridge/
 3. 保持 Bridge Core、Driver Protocol、OpenCode Driver、Claude Agent Driver、Worker Runtime 和 Storage 的依赖边界。
 4. 正常运行不得依赖 Agent UI 或 IDE；Bridge 负责权威状态、事件持久化和观察端扇出。
 5. 使用已经通过统一选型 Spike 的 OpenCode 主 Driver 和 Claude Agent SDK 降级 Driver；未经逐次单独授权不得执行真实 Provider 测试。
-6. 在领域内核先实现 TaskVersion、TaskRelation、AgentSessionBinding、ContextPackage、HandoffPackage 和 ContinuationSnapshot，不允许把这些约束只写进 Prompt。
+6. 复用已完成的 TaskVersion、TaskRelation、AgentSessionBinding、ContextPackage、HandoffPackage 和 ContinuationSnapshot，不允许旁路这些权威对象。
 7. 新需求和新 TaskVersion 必须创建新 Session；同版本返工可续接；达到 70% 阈值必须在安全边界滚动；任何跨版本复用必须返回稳定错误码。
 8. 输出实施计划、依赖清单、数据存储方案、协议版本方案、Context Package 组装策略和文件变更范围。
-9. 正式 Driver 编码从固化 Driver Contract、能力声明、事件映射和 Contract 测试开始；不得让具体 Provider SDK 泄漏到 Bridge Core。不得重新开放已关闭的产品决策，除非新的兼容性证据证明当前方案技术上不可行。
+9. 正式 Driver 已实现；后续 Provider 配置和凭据只在 Worker/Driver 边界扩展，不得让具体 Provider SDK 或秘密泄漏到 Bridge Core/Driver Protocol。不得重新开放已关闭的产品决策，除非新的兼容性证据证明当前方案技术上不可行。
 10. 不得提交模型凭据、本地数据库、Agent 运行记录、临时 worktree、本地 Agent 规则和过程规划文件。
 11. 完成后必须运行单元测试、集成测试和临时 Git 仓库端到端测试，并逐项报告用户故事和业务规则的验证结果。

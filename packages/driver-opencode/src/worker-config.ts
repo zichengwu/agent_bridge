@@ -10,23 +10,48 @@ import {
 import { createOpenCodeDriver, type OpenCodeDriverRecoveryState } from "./driver.js";
 import type { OpenCodeProviderConfiguration } from "./config.js";
 
+const OPENCODE_CREDENTIAL_ENV = "AGENT_BRIDGE_OPENCODE_API_KEY";
+
+export interface OpenCodeWorkerProviderConfiguration {
+  readonly id: string;
+  readonly baseUrl: string;
+  readonly model: string;
+  readonly smallModel?: string;
+  readonly permissions?: OpenCodeProviderConfiguration["permissions"];
+}
+
 export interface OpenCodeWorkerConfiguration {
   readonly hostname?: string;
   readonly port?: number;
   readonly timeoutMs?: number;
   readonly executablePath?: string;
-  readonly provider?: OpenCodeProviderConfiguration;
+  readonly provider?: OpenCodeWorkerProviderConfiguration;
 }
 
-export function createOpenCodeWorkerFactory(): DriverHostFactory {
+export function createOpenCodeWorkerFactory(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): DriverHostFactory {
   return {
     create(initialization) {
       const configuration = readOpenCodeWorkerConfiguration(initialization.configuration);
+      const secret = environment[OPENCODE_CREDENTIAL_ENV];
+      if (
+        (configuration.provider === undefined) !==
+        (secret === undefined || secret.length === 0)
+      ) {
+        throw invalidConfiguration();
+      }
+      const provider =
+        configuration.provider === undefined || secret === undefined
+          ? undefined
+          : buildProvider(configuration.provider, secret);
       return Promise.resolve(
         createOpenCodeDriver({
           workDirectory: initialization.workDirectory,
           recoveryStates: readRecoveryStates(initialization),
           ...configuration,
+          provider,
+          privateValues: secret === undefined ? [] : [secret],
         }),
       );
     },
@@ -51,19 +76,79 @@ export function readOpenCodeWorkerConfiguration(
   ) {
     throw invalidConfiguration();
   }
-  if (value.provider !== undefined && containsSensitiveKey(value.provider)) {
-    throw new DriverTransportError(
-      "DRIVER_TRANSPORT_MESSAGE_INVALID",
-      "OpenCode worker configuration must not contain credentials",
-    );
-  }
+  const provider = value.provider === undefined ? undefined : readProvider(value.provider);
   return Object.freeze({
     ...(value.hostname === undefined ? {} : { hostname: value.hostname }),
     ...(value.port === undefined ? {} : { port: value.port }),
     ...(value.timeoutMs === undefined ? {} : { timeoutMs: value.timeoutMs }),
     ...(value.executablePath === undefined ? {} : { executablePath: value.executablePath }),
-    ...(value.provider === undefined ? {} : { provider: structuredClone(value.provider) }),
+    ...(provider === undefined ? {} : { provider }),
   });
+}
+
+function readProvider(
+  value: Readonly<Record<string, unknown>>,
+): OpenCodeWorkerProviderConfiguration {
+  const allowed = new Set(["id", "baseUrl", "model", "smallModel", "permissions"]);
+  if (
+    Object.keys(value).some((key) => !allowed.has(key)) ||
+    typeof value.id !== "string" ||
+    typeof value.baseUrl !== "string" ||
+    typeof value.model !== "string" ||
+    (value.smallModel !== undefined && typeof value.smallModel !== "string") ||
+    (value.permissions !== undefined && !isPlainRecord(value.permissions))
+  ) {
+    throw new DriverTransportError(
+      "DRIVER_TRANSPORT_MESSAGE_INVALID",
+      "OpenCode worker credentials must not be sent over JSONL",
+    );
+  }
+  const permissions = value.permissions as OpenCodeProviderConfiguration["permissions"] | undefined;
+  return Object.freeze({
+    id: value.id,
+    baseUrl: value.baseUrl,
+    model: value.model,
+    ...(value.smallModel === undefined ? {} : { smallModel: value.smallModel }),
+    ...(permissions === undefined ? {} : { permissions: structuredClone(permissions) }),
+  });
+}
+
+function buildProvider(
+  provider: OpenCodeWorkerProviderConfiguration,
+  apiKey: string,
+): OpenCodeProviderConfiguration {
+  const selector = `${provider.id}/${provider.model}`;
+  return {
+    enabledProviders: [provider.id],
+    model: selector,
+    smallModel:
+      provider.smallModel === undefined ? selector : `${provider.id}/${provider.smallModel}`,
+    providers: {
+      [provider.id]: {
+        name: `Agent Bridge ${provider.id}`,
+        options: { apiKey, baseURL: provider.baseUrl },
+        models: {
+          [provider.model]: {
+            id: provider.model,
+            name: provider.model,
+            tool_call: true,
+            limit: { context: 1_000_000, output: 16_000 },
+          },
+          ...(provider.smallModel === undefined || provider.smallModel === provider.model
+            ? {}
+            : {
+                [provider.smallModel]: {
+                  id: provider.smallModel,
+                  name: provider.smallModel,
+                  tool_call: true,
+                  limit: { context: 1_000_000, output: 16_000 },
+                },
+              }),
+        },
+      },
+    },
+    permissions: provider.permissions,
+  };
 }
 
 function readRecoveryStates(
@@ -72,24 +157,6 @@ function readRecoveryStates(
   return (initialization.recoveryStates ?? []).map(
     (state) => structuredClone(state) as unknown as OpenCodeDriverRecoveryState,
   );
-}
-
-function containsSensitiveKey(value: Readonly<Record<string, unknown>>): boolean {
-  for (const [key, nested] of Object.entries(value)) {
-    if (/(?:api[_-]?key|token|secret|password|authorization)/iu.test(key)) {
-      return true;
-    }
-    if (isPlainRecord(nested) && containsSensitiveKey(nested)) {
-      return true;
-    }
-    if (
-      Array.isArray(nested) &&
-      nested.some((item) => isPlainRecord(item) && containsSensitiveKey(item))
-    ) {
-      return true;
-    }
-  }
-  return false;
 }
 
 function isPlainRecord(value: unknown): value is Readonly<Record<string, unknown>> {

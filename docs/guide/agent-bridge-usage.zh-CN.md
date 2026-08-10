@@ -8,9 +8,10 @@ Agent Bridge 是本机单用户控制层。它通过 MCP stdio、SQLite、Artifa
 
 1. 使用 Node.js 22.13+、pnpm 11.9 和 Git。
 2. 执行 `pnpm install --frozen-lockfile` 与 `pnpm verify`。
-3. 复制 `config/agent-bridge.example.yaml`，填写项目、runtime、项目基线以及两个正式 Driver Worker 的绝对路径。配置中不得写 Token、Cookie、密码或 Agent 登录信息。
+3. 复制 `config/agent-bridge.example.yaml`，按 `config/agent-bridge.schema.json` 填写项目、runtime、项目基线、正式 Driver bin、底层 runtime executable 和非敏感 Provider 配置。配置中不得写 Token、Cookie、密码或 Agent 登录信息。
 4. runtime 目录必须独立于产品仓库；项目基线采用 `config/project-baseline.example.json` 的结构。
-5. 从 `config/task-contracts/` 选择角色样例，替换项目事实后重新计算 `content_hash`。
+5. 从 `config/task-contracts/` 选择角色样例，替换项目事实后用 `pnpm bridge:content-hash -- /absolute/path/to/task.json` 重新计算 `content_hash`。
+6. 用 `pnpm bridge:preflight -- /absolute/path/to/agent-bridge.yaml` 检查配置、Git、目录、可执行权限和 Provider 完整性；诊断通过后再注册 MCP。
 
 启动：
 
@@ -18,6 +19,46 @@ Agent Bridge 是本机单用户控制层。它通过 MCP stdio、SQLite、Artifa
 pnpm build
 pnpm bridge:mcp -- --config /absolute/path/to/agent-bridge.yaml
 ```
+
+### 2.1 Provider 与凭据
+
+运行时 YAML 只保存 `provider.id`、`base_url`、`model`、工具权限、轮次和预算等非敏感字段。环境变量只允许以下两个固定名称：
+
+- OpenCode：`AGENT_BRIDGE_OPENCODE_API_KEY`
+- Claude fallback：`AGENT_BRIDGE_CLAUDE_AUTH_TOKEN`
+
+Bridge 为对应 Driver 构造最小子进程环境，不转发整个父进程环境。若 `credentials.source: json_file`，文件必须使用用户显式配置的绝对路径，位于产品仓库、worktree、`runtime_root` 和 Artifact 根之外；必须是无符号链接的普通文件、当前用户所有，Unix 权限为 `0400` 或 `0600`。环境变量与文件同时存在时启动失败，不会静默覆盖。
+
+OpenCode 文件只允许：
+
+```json
+{ "schema_version": 1, "driver_id": "opencode", "api_key": "<通过安全方式写入>" }
+```
+
+Claude 文件只允许：
+
+```json
+{ "schema_version": 1, "driver_id": "claude-agent", "auth_token": "<通过安全方式写入>" }
+```
+
+不要把真实值放入聊天、命令参数、版本库或示例文件。Bridge 只在启动前/创建 Driver 时最小读取，注入子进程后不把内容放入 SQLite、Artifact、事件、日志、错误详情或 stdio 初始化 JSON。
+
+### 2.2 Codex MCP 注册
+
+在 Codex 的 `config.toml` 中注册本地 stdio Server；`command`、`args`、`cwd` 和 `env_vars` 是当前官方支持的字段：
+
+```toml
+[mcp_servers.agent_bridge]
+command = "/absolute/path/to/node"
+args = ["/absolute/path/to/agent_bridge/apps/bridge-mcp/dist/index.js", "--config", "/absolute/path/to/agent-bridge.yaml"]
+cwd = "/absolute/path/to/agent_bridge"
+env_vars = ["AGENT_BRIDGE_OPENCODE_API_KEY", "AGENT_BRIDGE_CLAUDE_AUTH_TOKEN"]
+startup_timeout_sec = 30
+tool_timeout_sec = 3600
+required = true
+```
+
+ChatGPT Desktop 可在 Settings → MCP servers 添加 STDIO Server 后重启；Codex CLI/IDE 可在配置后用 `/mcp` 或 MCP 列表确认连接。参见[官方 Codex MCP 文档](https://developers.openai.com/codex/mcp/)。
 
 ## 3. 角色与权限
 
@@ -60,3 +101,9 @@ MCP 错误返回稳定 `code`，并附 `category` 与 `retryable`。类别包括
 凭据字段、完整 transcript、内部推理字段和常见 Token 形态在进入领域事件、错误详情与恢复 Artifact 前会被移除或遮蔽。验证日志也执行相同类型的 Token 脱敏。
 
 失败、取消或最终完成后，Bridge 关闭 Driver 进程并释放租约，同时写入资源清理审计。为了支持核查和安全移交，worktree 与隔离目录默认保留；当前不会自动删除 Artifact，只提供临时文件清理和孤儿预览。需要释放磁盘时，应先核对持久化引用和保留策略，再执行显式清理。
+
+## 9. macOS code 126 / EPERM
+
+先运行 preflight。若正式 Driver 或 runtime executable 不可执行，修正文件执行位、quarantine 或 `noexec` 挂载后重试。历史 B-simulated 还会嵌套调用 macOS `sandbox-exec`；在 Codex 自身沙箱禁止再次套沙箱时，`pnpm spike:drivers:b:preflight` 会返回 `B_LAYER_NETWORK_SANDBOX_NESTING_DENIED`，底层探针表现为 `sandbox_apply: Operation not permitted`，对应测试明确跳过。请在未被上层沙箱包裹的 macOS 终端运行 B-simulated 门禁。这个限制不影响不嵌套 `sandbox-exec` 的正式产品路径；使用 `pnpm test:e2e:phase4.1` 验证正式 Worker/Runtime、loopback Provider、恢复和取消链路。
+
+B-simulated、Phase 4.1 集成模拟和真实 Provider 验收是三类独立证据：前两者始终为零真实请求，不能替代真实 Provider；历史 B-real 结果也不能替代当前配置、启动、持久化和 MCP 完整链路验收。

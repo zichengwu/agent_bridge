@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -67,97 +68,108 @@ interface ScenarioEvidence {
   temporaryRootRemoved: boolean;
 }
 
-describe.sequential("ClaudeAgentDriver 0.3.215 / Claude Code 2.1.215 正式 B-simulated 回归", () => {
-  it("通过正式 Driver 连续两次完成允许写入、统一事件、用量、结果和 Git 白名单验证", async () => {
-    const first = await runFormalClaudeScenario("write", "run-claude-write-1");
-    const second = await runFormalClaudeScenario("write", "run-claude-write-2");
+const nestedMacOsSandboxUnavailable =
+  process.platform === "darwin" &&
+  spawnSync("/usr/bin/sandbox-exec", ["-p", "(version 1)(allow default)", "/usr/bin/true"], {
+    stdio: "ignore",
+  }).status !== 0;
 
-    for (const evidence of [first, second]) {
-      expect(evidence.provider.requests).toBe(3);
-      expect(evidence.eventTypes).toContain("output.delta");
-      expect(evidence.eventTypes).toContain("permission.requested");
-      expect(evidence.eventTypes).toContain("permission.responded");
+describe
+  .skipIf(nestedMacOsSandboxUnavailable)
+  .sequential("ClaudeAgentDriver 0.3.215 / Claude Code 2.1.215 正式 B-simulated 回归", () => {
+    it("通过正式 Driver 连续两次完成允许写入、统一事件、用量、结果和 Git 白名单验证", async () => {
+      const first = await runFormalClaudeScenario("write", "run-claude-write-1");
+      const second = await runFormalClaudeScenario("write", "run-claude-write-2");
+
+      for (const evidence of [first, second]) {
+        expect(evidence.provider.requests).toBe(3);
+        expect(evidence.eventTypes).toContain("output.delta");
+        expect(evidence.eventTypes).toContain("permission.requested");
+        expect(evidence.eventTypes).toContain("permission.responded");
+        expect(evidence.result.status).toBe("succeeded");
+        expect(evidence.result.output.text).toContain("completed safely");
+        expect(evidence.result.usage?.inputTokens).toBeGreaterThan(0);
+        expect(evidence.result.usage?.outputTokens).toBeGreaterThan(0);
+        expect(evidence.git.changedFiles).toEqual(["src/sum.ts"]);
+        expect(evidence.git.verificationExitCode).toBe(0);
+        expect(evidence.permissionDecisions).toEqual(["allow", "allow"]);
+        expect(evidence.permissionWaitHadNoSideEffect).toBe(true);
+        assertProviderBoundary(evidence.provider);
+        assertSafetyClosure(evidence);
+      }
+
+      expect(second.eventTypes).toEqual(first.eventTypes);
+      expect(second.provider.requests).toBe(first.provider.requests);
+      expect(second.result.status).toBe(first.result.status);
+    }, 120_000);
+
+    it("在独立 claude-review worktree 只读复核 Handoff patch", async () => {
+      const evidence = await runFormalClaudeScenario("review", "run-claude-review");
+
+      expect(evidence.provider.requests).toBe(2);
+      expect(evidence.permissionDecisions).toEqual(["allow"]);
+      expect(evidence.permissionWaitHadNoSideEffect).toBe(true);
+      expect(evidence.reviewReadOnly).toBe(true);
       expect(evidence.result.status).toBe("succeeded");
-      expect(evidence.result.output.text).toContain("completed safely");
-      expect(evidence.result.usage?.inputTokens).toBeGreaterThan(0);
-      expect(evidence.result.usage?.outputTokens).toBeGreaterThan(0);
+      expect(evidence.result.output.text).toContain('"findings":[]');
       expect(evidence.git.changedFiles).toEqual(["src/sum.ts"]);
       expect(evidence.git.verificationExitCode).toBe(0);
-      expect(evidence.permissionDecisions).toEqual(["allow", "allow"]);
-      expect(evidence.permissionWaitHadNoSideEffect).toBe(true);
       assertProviderBoundary(evidence.provider);
       assertSafetyClosure(evidence);
-    }
+    }, 60_000);
 
-    expect(second.eventTypes).toEqual(first.eventTypes);
-    expect(second.provider.requests).toBe(first.provider.requests);
-    expect(second.result.status).toBe(first.result.status);
-  }, 120_000);
+    it("权限拒绝在等待期间和终态后均保持工作目录外文件系统不变", async () => {
+      const evidence = await runFormalClaudeScenario("deny", "run-claude-deny");
 
-  it("在独立 claude-review worktree 只读复核 Handoff patch", async () => {
-    const evidence = await runFormalClaudeScenario("review", "run-claude-review");
+      expect(evidence.permissionDecisions).toEqual(["deny"]);
+      expect(evidence.permissionWaitHadNoSideEffect).toBe(true);
+      expect(evidence.eventTypes).toContain("permission.requested");
+      expect(evidence.eventTypes).toContain("permission.responded");
+      expect(
+        evidence.events.some(
+          (event) => event.type === "tool.completed" && event.outcome === "denied",
+        ),
+      ).toBe(true);
+      expect(evidence.result.status).toBe("succeeded");
+      expect(evidence.git.changedFiles).toEqual([]);
+      expect(evidence.git.verificationExitCode).not.toBe(0);
+      assertProviderBoundary(evidence.provider);
+      assertSafetyClosure(evidence);
+    }, 60_000);
 
-    expect(evidence.provider.requests).toBe(2);
-    expect(evidence.permissionDecisions).toEqual(["allow"]);
-    expect(evidence.permissionWaitHadNoSideEffect).toBe(true);
-    expect(evidence.reviewReadOnly).toBe(true);
-    expect(evidence.result.status).toBe("succeeded");
-    expect(evidence.result.output.text).toContain('"findings":[]');
-    expect(evidence.git.changedFiles).toEqual(["src/sum.ts"]);
-    expect(evidence.git.verificationExitCode).toBe(0);
-    assertProviderBoundary(evidence.provider);
-    assertSafetyClosure(evidence);
-  }, 60_000);
+    it("执行中取消形成 cancelled 终态且取消后没有工具调用或文件写入", async () => {
+      const evidence = await runFormalClaudeScenario("cancel", "run-claude-cancel");
 
-  it("权限拒绝在等待期间和终态后均保持工作目录外文件系统不变", async () => {
-    const evidence = await runFormalClaudeScenario("deny", "run-claude-deny");
+      expect(evidence.eventTypes[0]).toBe("run.started");
+      expect(evidence.eventTypes.slice(-2)).toEqual([
+        "run.cancellation_requested",
+        "run.cancelled",
+      ]);
+      expect(
+        evidence.eventTypes.some((type) => type === "tool.started" || type === "tool.completed"),
+      ).toBe(false);
+      expect(evidence.result.status).toBe("cancelled");
+      expect(evidence.git.changedFiles).toEqual([]);
+      expect(evidence.postCancelSideEffects).toBe(0);
+      expect(evidence.provider.requests).toBe(1);
+      assertProviderBoundary(evidence.provider);
+      assertSafetyClosure(evidence);
+    }, 60_000);
 
-    expect(evidence.permissionDecisions).toEqual(["deny"]);
-    expect(evidence.permissionWaitHadNoSideEffect).toBe(true);
-    expect(evidence.eventTypes).toContain("permission.requested");
-    expect(evidence.eventTypes).toContain("permission.responded");
-    expect(
-      evidence.events.some(
-        (event) => event.type === "tool.completed" && event.outcome === "denied",
-      ),
-    ).toBe(true);
-    expect(evidence.result.status).toBe("succeeded");
-    expect(evidence.git.changedFiles).toEqual([]);
-    expect(evidence.git.verificationExitCode).not.toBe(0);
-    assertProviderBoundary(evidence.provider);
-    assertSafetyClosure(evidence);
-  }, 60_000);
+    it("Driver 与 Claude Code 重启后由正式 resumeTask 恢复同一 Session 和连续事件边界", async () => {
+      const evidence = await runFormalClaudeScenario("resume", "run-claude-resume");
 
-  it("执行中取消形成 cancelled 终态且取消后没有工具调用或文件写入", async () => {
-    const evidence = await runFormalClaudeScenario("cancel", "run-claude-cancel");
-
-    expect(evidence.eventTypes[0]).toBe("run.started");
-    expect(evidence.eventTypes.slice(-2)).toEqual(["run.cancellation_requested", "run.cancelled"]);
-    expect(
-      evidence.eventTypes.some((type) => type === "tool.started" || type === "tool.completed"),
-    ).toBe(false);
-    expect(evidence.result.status).toBe("cancelled");
-    expect(evidence.git.changedFiles).toEqual([]);
-    expect(evidence.postCancelSideEffects).toBe(0);
-    expect(evidence.provider.requests).toBe(1);
-    assertProviderBoundary(evidence.provider);
-    assertSafetyClosure(evidence);
-  }, 60_000);
-
-  it("Driver 与 Claude Code 重启后由正式 resumeTask 恢复同一 Session 和连续事件边界", async () => {
-    const evidence = await runFormalClaudeScenario("resume", "run-claude-resume");
-
-    expect(evidence.resumedSameSession).toBe(true);
-    expect(evidence.eventTypes).toContain("run.resumed");
-    expect(evidence.eventTypes.at(-1)).toBe("run.completed");
-    expect(evidence.result.status).toBe("succeeded");
-    expect(evidence.git.changedFiles).toEqual(["src/sum.ts"]);
-    expect(evidence.git.verificationExitCode).toBe(0);
-    expect(evidence.provider.requests).toBe(4);
-    assertProviderBoundary(evidence.provider);
-    assertSafetyClosure(evidence);
-  }, 90_000);
-});
+      expect(evidence.resumedSameSession).toBe(true);
+      expect(evidence.eventTypes).toContain("run.resumed");
+      expect(evidence.eventTypes.at(-1)).toBe("run.completed");
+      expect(evidence.result.status).toBe("succeeded");
+      expect(evidence.git.changedFiles).toEqual(["src/sum.ts"]);
+      expect(evidence.git.verificationExitCode).toBe(0);
+      expect(evidence.provider.requests).toBe(4);
+      assertProviderBoundary(evidence.provider);
+      assertSafetyClosure(evidence);
+    }, 90_000);
+  });
 
 async function runFormalClaudeScenario(
   scenario: ClaudeFormalProviderScenario,

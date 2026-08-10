@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { access, chmod, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
@@ -7,6 +8,16 @@ export async function assertLoopbackSandboxAvailable(): Promise<void> {
     throw new Error("B_LAYER_NETWORK_SANDBOX_UNSUPPORTED");
   }
   await access("/usr/bin/sandbox-exec");
+  const probe = spawnSync(
+    "/usr/bin/sandbox-exec",
+    ["-p", "(version 1)(allow default)", "/usr/bin/true"],
+    { encoding: "utf8" },
+  );
+  if (probe.status !== 0) {
+    throw new Error(
+      "B_LAYER_NETWORK_SANDBOX_NESTING_DENIED: macOS sandbox-exec cannot create the required loopback sandbox in this host; run B-simulated from an unsandboxed macOS terminal",
+    );
+  }
 }
 
 export function buildLoopbackSandboxProfile(

@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,9 +7,16 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 import {
+  assertLoopbackSandboxAvailable,
   buildLoopbackSandboxProfile,
   sensitiveAgentConfigurationPaths,
 } from "../src/harness/network-sandbox.js";
+
+const nestedMacOsSandboxUnavailable =
+  process.platform === "darwin" &&
+  spawnSync("/usr/bin/sandbox-exec", ["-p", "(version 1)(allow default)", "/usr/bin/true"], {
+    encoding: "utf8",
+  }).status !== 0;
 
 describe("B 层网络沙箱", () => {
   it("拒绝一般网络，仅允许 loopback 并记录独立工作目录边界", () => {
@@ -42,30 +49,39 @@ describe("B 层网络沙箱", () => {
     ]);
   });
 
-  it.runIf(process.platform === "darwin")("系统沙箱只允许在白名单根内写入", async () => {
-    const root = await mkdtemp(join(tmpdir(), "agent-bridge-sandbox-test-"));
-    const allowedRoot = join(root, "allowed");
-    const profilePath = join(root, "profile.sb");
-    await mkdir(allowedRoot);
-    await writeFile(profilePath, buildLoopbackSandboxProfile(allowedRoot), "utf8");
-    try {
-      await promisify(execFile)("/usr/bin/sandbox-exec", [
-        "-f",
-        profilePath,
-        "/usr/bin/touch",
-        join(allowedRoot, "inside"),
-      ]);
-      await expect(access(join(allowedRoot, "inside"))).resolves.toBeUndefined();
-      await expect(
-        promisify(execFile)("/usr/bin/sandbox-exec", [
+  it.runIf(nestedMacOsSandboxUnavailable)("嵌套沙箱不可用时给出稳定前置诊断", async () => {
+    await expect(assertLoopbackSandboxAvailable()).rejects.toThrow(
+      "B_LAYER_NETWORK_SANDBOX_NESTING_DENIED",
+    );
+  });
+
+  it.runIf(process.platform === "darwin" && !nestedMacOsSandboxUnavailable)(
+    "系统沙箱只允许在白名单根内写入",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "agent-bridge-sandbox-test-"));
+      const allowedRoot = join(root, "allowed");
+      const profilePath = join(root, "profile.sb");
+      await mkdir(allowedRoot);
+      await writeFile(profilePath, buildLoopbackSandboxProfile(allowedRoot), "utf8");
+      try {
+        await promisify(execFile)("/usr/bin/sandbox-exec", [
           "-f",
           profilePath,
           "/usr/bin/touch",
-          join(root, "outside"),
-        ]),
-      ).rejects.toThrow();
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
+          join(allowedRoot, "inside"),
+        ]);
+        await expect(access(join(allowedRoot, "inside"))).resolves.toBeUndefined();
+        await expect(
+          promisify(execFile)("/usr/bin/sandbox-exec", [
+            "-f",
+            profilePath,
+            "/usr/bin/touch",
+            join(root, "outside"),
+          ]),
+        ).rejects.toThrow();
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 });

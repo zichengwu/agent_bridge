@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -59,83 +60,94 @@ interface ScenarioEvidence {
   temporaryRootRemoved: boolean;
 }
 
-describe.sequential("OpenCodeDriver 1.18.3 正式 B-simulated 回归", () => {
-  it("通过正式 Driver 重复完成允许写入、统一事件、用量、结果和 Git 白名单验证", async () => {
-    const first = await runFormalScenario("write", "run-write-1");
-    const second = await runFormalScenario("write", "run-write-2");
+const nestedMacOsSandboxUnavailable =
+  process.platform === "darwin" &&
+  spawnSync("/usr/bin/sandbox-exec", ["-p", "(version 1)(allow default)", "/usr/bin/true"], {
+    stdio: "ignore",
+  }).status !== 0;
 
-    for (const evidence of [first, second]) {
-      expect(
-        evidence.provider.requests,
-        `provider requests=${evidence.provider.requests}`,
-      ).toBeGreaterThan(1);
-      expect(evidence.eventTypes, evidence.eventTypes.join(",")).toContain("output.delta");
+describe
+  .skipIf(nestedMacOsSandboxUnavailable)
+  .sequential("OpenCodeDriver 1.18.3 正式 B-simulated 回归", () => {
+    it("通过正式 Driver 重复完成允许写入、统一事件、用量、结果和 Git 白名单验证", async () => {
+      const first = await runFormalScenario("write", "run-write-1");
+      const second = await runFormalScenario("write", "run-write-2");
+
+      for (const evidence of [first, second]) {
+        expect(
+          evidence.provider.requests,
+          `provider requests=${evidence.provider.requests}`,
+        ).toBeGreaterThan(1);
+        expect(evidence.eventTypes, evidence.eventTypes.join(",")).toContain("output.delta");
+        expect(evidence.result.status).toBe("succeeded");
+        expect(evidence.result.output.text).toBeTypeOf("string");
+        expect(evidence.result.output.text).toContain("allowed file");
+        expect(evidence.result.usage?.inputTokens).toBeGreaterThan(0);
+        expect(evidence.result.usage?.outputTokens).toBeGreaterThan(0);
+        expect(evidence.git.changedFiles).toEqual(["src/sum.ts"]);
+        expect(evidence.git.verificationExitCode).toBe(0);
+        expect(evidence.permissionDecision).toBe("allow");
+        expect(evidence.permissionWaitHadNoSideEffect).toBe(true);
+        expect(evidence.provider).toMatchObject({
+          rejectedRequests: 0,
+          realProviderRequests: 0,
+        });
+        expect(evidence.provider.paths.every((path) => path === "/v1/chat/completions")).toBe(true);
+        expect(evidence.provider.models.every((model) => model === "deepseek-v4-pro")).toBe(true);
+        assertSafetyClosure(evidence);
+      }
+
+      expect(second.eventTypes).toEqual(first.eventTypes);
+      expect(second.provider.requests).toBe(first.provider.requests);
+      expect(second.result.status).toBe(first.result.status);
+    }, 90_000);
+
+    it("权限拒绝在等待期间和终态后均保持工作目录外文件系统不变", async () => {
+      const evidence = await runFormalScenario("deny", "run-deny");
+
+      expect(evidence.permissionDecision).toBe("deny");
+      expect(evidence.permissionWaitHadNoSideEffect).toBe(true);
+      expect(evidence.eventTypes).toContain("permission.requested");
+      expect(evidence.eventTypes).toContain("permission.responded");
       expect(evidence.result.status).toBe("succeeded");
-      expect(evidence.result.output.text).toBeTypeOf("string");
-      expect(evidence.result.output.text).toContain("allowed file");
-      expect(evidence.result.usage?.inputTokens).toBeGreaterThan(0);
-      expect(evidence.result.usage?.outputTokens).toBeGreaterThan(0);
+      expect(evidence.git.changedFiles).toEqual([]);
+      expect(evidence.git.verificationExitCode).not.toBe(0);
+      expect(evidence.provider.realProviderRequests).toBe(0);
+      assertSafetyClosure(evidence);
+    }, 45_000);
+
+    it("执行中取消形成 cancelled 终态且取消后没有工具调用或文件写入", async () => {
+      const evidence = await runFormalScenario("cancel", "run-cancel");
+
+      expect(evidence.eventTypes[0]).toBe("run.started");
+      expect(evidence.eventTypes.slice(-2)).toEqual([
+        "run.cancellation_requested",
+        "run.cancelled",
+      ]);
+      expect(
+        evidence.eventTypes.some((type) => type === "tool.started" || type === "tool.completed"),
+      ).toBe(false);
+      expect(evidence.result.status).toBe("cancelled");
+      expect(evidence.git.changedFiles).toEqual([]);
+      expect(evidence.postCancelSideEffects).toBe(0);
+      expect(evidence.provider.requests).toBe(1);
+      expect(evidence.provider.realProviderRequests).toBe(0);
+      assertSafetyClosure(evidence);
+    }, 45_000);
+
+    it("Driver 与 OpenCode Server 重启后由正式 resumeTask 恢复同一 Session 和连续事件边界", async () => {
+      const evidence = await runFormalScenario("resume", "run-resume");
+
+      expect(evidence.resumedSameSession).toBe(true);
+      expect(evidence.eventTypes).toContain("run.resumed");
+      expect(evidence.eventTypes.at(-1)).toBe("run.completed");
+      expect(evidence.result.status).toBe("succeeded");
       expect(evidence.git.changedFiles).toEqual(["src/sum.ts"]);
       expect(evidence.git.verificationExitCode).toBe(0);
-      expect(evidence.permissionDecision).toBe("allow");
-      expect(evidence.permissionWaitHadNoSideEffect).toBe(true);
-      expect(evidence.provider).toMatchObject({
-        rejectedRequests: 0,
-        realProviderRequests: 0,
-      });
-      expect(evidence.provider.paths.every((path) => path === "/v1/chat/completions")).toBe(true);
-      expect(evidence.provider.models.every((model) => model === "deepseek-v4-pro")).toBe(true);
+      expect(evidence.provider.realProviderRequests).toBe(0);
       assertSafetyClosure(evidence);
-    }
-
-    expect(second.eventTypes).toEqual(first.eventTypes);
-    expect(second.provider.requests).toBe(first.provider.requests);
-    expect(second.result.status).toBe(first.result.status);
-  }, 90_000);
-
-  it("权限拒绝在等待期间和终态后均保持工作目录外文件系统不变", async () => {
-    const evidence = await runFormalScenario("deny", "run-deny");
-
-    expect(evidence.permissionDecision).toBe("deny");
-    expect(evidence.permissionWaitHadNoSideEffect).toBe(true);
-    expect(evidence.eventTypes).toContain("permission.requested");
-    expect(evidence.eventTypes).toContain("permission.responded");
-    expect(evidence.result.status).toBe("succeeded");
-    expect(evidence.git.changedFiles).toEqual([]);
-    expect(evidence.git.verificationExitCode).not.toBe(0);
-    expect(evidence.provider.realProviderRequests).toBe(0);
-    assertSafetyClosure(evidence);
-  }, 45_000);
-
-  it("执行中取消形成 cancelled 终态且取消后没有工具调用或文件写入", async () => {
-    const evidence = await runFormalScenario("cancel", "run-cancel");
-
-    expect(evidence.eventTypes[0]).toBe("run.started");
-    expect(evidence.eventTypes.slice(-2)).toEqual(["run.cancellation_requested", "run.cancelled"]);
-    expect(
-      evidence.eventTypes.some((type) => type === "tool.started" || type === "tool.completed"),
-    ).toBe(false);
-    expect(evidence.result.status).toBe("cancelled");
-    expect(evidence.git.changedFiles).toEqual([]);
-    expect(evidence.postCancelSideEffects).toBe(0);
-    expect(evidence.provider.requests).toBe(1);
-    expect(evidence.provider.realProviderRequests).toBe(0);
-    assertSafetyClosure(evidence);
-  }, 45_000);
-
-  it("Driver 与 OpenCode Server 重启后由正式 resumeTask 恢复同一 Session 和连续事件边界", async () => {
-    const evidence = await runFormalScenario("resume", "run-resume");
-
-    expect(evidence.resumedSameSession).toBe(true);
-    expect(evidence.eventTypes).toContain("run.resumed");
-    expect(evidence.eventTypes.at(-1)).toBe("run.completed");
-    expect(evidence.result.status).toBe("succeeded");
-    expect(evidence.git.changedFiles).toEqual(["src/sum.ts"]);
-    expect(evidence.git.verificationExitCode).toBe(0);
-    expect(evidence.provider.realProviderRequests).toBe(0);
-    assertSafetyClosure(evidence);
-  }, 60_000);
-});
+    }, 60_000);
+  });
 
 async function runFormalScenario(
   scenario: FormalProviderScenario,
