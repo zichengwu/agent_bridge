@@ -2,13 +2,15 @@ import { randomUUID } from "node:crypto";
 import { readFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { computeContentHash, computeDocumentContentHash } from "@agent-bridge/core";
+import { computeContentHash } from "@agent-bridge/core";
 import {
   DOMAIN_SCHEMA_VERSION,
   parseProjectBaseline,
   type DomainJsonValue,
 } from "@agent-bridge/schemas";
 import { SqliteDomainRepository } from "@agent-bridge/storage-sqlite";
+import { LocalArtifactRepository } from "@agent-bridge/artifacts-local";
+import { PersistentEventFanout } from "@agent-bridge/observability";
 import {
   ActiveRunRegistry,
   ContextHandoffRuntime,
@@ -19,9 +21,11 @@ import {
 import { BridgeControlService } from "./bridge-control-service.js";
 import { controlError } from "./errors.js";
 import { LocalBridgeRuntime } from "./local-runtime.js";
+import { OutboxPump } from "./outbox-pump.js";
 
 export interface BridgeApplication {
   readonly service: BridgeControlService;
+  readonly events: PersistentEventFanout;
   close(): Promise<void>;
 }
 
@@ -32,6 +36,8 @@ export async function bootstrapBridgeApplication(configPath: string): Promise<Br
     database_path: resolve(configuration.project.runtime_root, "agent-bridge.sqlite"),
   });
   const activeRuns = new ActiveRunRegistry();
+  let outbox: OutboxPump | undefined;
+  let events: PersistentEventFanout | undefined;
   try {
     await ensureProjectBaseline(
       repository,
@@ -40,7 +46,16 @@ export async function bootstrapBridgeApplication(configPath: string): Promise<Br
     );
     const git = new DefaultGitClient({ executable: "/usr/bin/git" });
     const contexts = new ContextHandoffRuntime(repository, git);
-    const runtime = new LocalBridgeRuntime(repository, activeRuns, configuration);
+    const artifacts = await LocalArtifactRepository.open({
+      root_path: resolve(configuration.project.runtime_root, "artifacts"),
+    });
+    const runtime = new LocalBridgeRuntime(
+      repository,
+      activeRuns,
+      configuration,
+      repository.createLeaseManager(),
+      artifacts,
+    );
     const service = new BridgeControlService({
       repository,
       contexts,
@@ -52,15 +67,28 @@ export async function bootstrapBridgeApplication(configPath: string): Promise<Br
       timeout_seconds: configuration.limits.timeout_seconds,
       max_agent_count: configuration.limits.max_agent_count,
     });
-    runtime.setEventListener((event) => service.onAgentEvent(event));
+    runtime.setEventListener((runId, event) => service.onAgentEvent(event, runId));
+    await runtime.recoverPersistedRuns();
+    events = new PersistentEventFanout(repository);
+    outbox = new OutboxPump(
+      repository.createOutboxDispatcher({ dispatcher_id: "bridge-mcp" }),
+      async () => events?.pollOnce(),
+    );
+    await outbox.drain();
+    outbox.start();
     return Object.freeze({
       service,
+      events,
       close: async () => {
+        await outbox?.stop();
+        events?.stop();
         await activeRuns.closeAll();
         repository.close();
       },
     });
   } catch (error) {
+    await outbox?.stop();
+    events?.stop();
     await activeRuns.closeAll();
     repository.close();
     throw error;
@@ -97,7 +125,11 @@ async function ensureProjectBaseline(
   };
   const baseline = parseProjectBaseline({
     ...base,
-    content_hash: computeDocumentContentHash(base),
+    content_hash: computeContentHash({
+      project_id: projectId,
+      baseline_version: version,
+      baseline: source.content as DomainJsonValue,
+    }),
   });
   const requestId = randomUUID();
   await repository.commit({

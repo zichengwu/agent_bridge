@@ -1165,12 +1165,14 @@ agent-bridge/
 - Claude Agent SDK `0.3.215` / Claude Code `2.1.215` 降级 Driver 子进程。
 - 两个 Driver 的能力声明、统一事件映射和 Contract 测试。
 - Driver 级显式降级；不把共用 DeepSeek 描述为 Provider 级灾备。
+- Coordinator、Developer、Tester、Reviewer、Docs/Research 固定角色模板，以及 Prompt、模型、工具和路径权限映射；Reviewer 与 Coordinator 默认只读，Tester 不得修改产品代码。
 - 进程和 session 管理。
 - 上下文用量采集/估算、检查点生成和 Session 滚动。
 - Handoff 生成、完整性校验、陈旧依赖检查和 Context Package 组装。
 - Git/worktree 管理。
 - 验收执行。
 - 超时、取消和恢复。
+- 将工程初始化时期的历史 Cline 配置字段迁移为 OpenCode 主 Driver、Claude 降级 Driver 的运行时配置与无凭据示例，并提供严格校验；历史 Spike 配置不得作为 MVP 运行时契约。
 - 集成测试。
 
 ### Phase 3：Codex 接入
@@ -1187,7 +1189,7 @@ agent-bridge/
 - 幂等和租约。
 - 崩溃恢复。
 - 日志脱敏。
-- 示例项目和中文使用文档。
+- 示例项目、与正式 Driver/权限模型一致的配置样例和中文使用文档。
 
 ## 22. 风险、假设与验证计划
 

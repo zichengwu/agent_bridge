@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -116,6 +116,37 @@ describe("Git worktree 隔离", () => {
       expect.objectContaining({ code: "LEASE_OWNERSHIP_MISMATCH" }),
     );
     manager.release(ownership.worktreePath, "run-1");
+    expect(leases.snapshot()).toEqual([]);
+  });
+
+  it("Bridge 重启后可重新接管同一 Run 的既有 worktree 和租约", async () => {
+    const fixture = await createRepository();
+    const leases = new InMemoryLeaseManager();
+    const first = new GitWorktreeManager(fixture.git, leases);
+    const created = await first.ensure(request(fixture));
+    await writeFile(join(created.worktreePath, "src", "partial.ts"), "export const partial = 1;\n");
+
+    const replacement = new GitWorktreeManager(fixture.git, leases);
+    const adopted = await replacement.ensure(request(fixture));
+
+    expect(adopted).toMatchObject({
+      worktreePath: created.worktreePath,
+      runId: "run-1",
+      branch: "codex/task-1",
+    });
+    await expect(
+      replacement.validateDiff({
+        worktreePath: adopted.worktreePath,
+        baseCommit: fixture.baseCommit,
+        ownerId: "run-1",
+        role: "developer",
+        scope: { read: ["**"], write: ["src/**"], deny: [] },
+      }),
+    ).resolves.toEqual({ changedFiles: ["src/partial.ts"] });
+    replacement.release(adopted.worktreePath, "run-1");
+    await expect(readFile(join(adopted.worktreePath, "src", "partial.ts"), "utf8")).resolves.toBe(
+      "export const partial = 1;\n",
+    );
     expect(leases.snapshot()).toEqual([]);
   });
 });

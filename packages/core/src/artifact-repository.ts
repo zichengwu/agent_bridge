@@ -46,6 +46,7 @@ export interface ArtifactRepository {
 }
 
 export const ARTIFACT_REFERENCE_SOURCE_KINDS = [
+  "agent_run",
   "task_result",
   "handoff_package",
   "continuation_snapshot",

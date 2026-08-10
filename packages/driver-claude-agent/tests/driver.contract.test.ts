@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DRIVER_PROTOCOL_VERSION,
   DriverProtocolError,
+  asJsonObject,
   assertAgentEventSequence,
   type AgentEvent,
   type PrepareTaskRequest,
@@ -29,6 +30,8 @@ describe("Claude Agent Driver Contract", () => {
       context: { contextPackageId: "context-1" },
     });
     const recovery = firstDriver.exportRecoveryState(started.runId);
+    expect(() => asJsonObject(started)).not.toThrow();
+    expect(() => asJsonObject(recovery)).not.toThrow();
     await firstDriver.close();
 
     const driver = new ClaudeAgentDriver(runtime, {

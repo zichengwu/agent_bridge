@@ -9,6 +9,8 @@ export const SQLITE_STORAGE_ERROR_CODES = [
   "OUTBOX_REQUEST_INVALID",
   "OUTBOX_LEASE_CONFLICT",
   "OUTBOX_DELIVERY_FAILED",
+  "LEASE_CONFLICT",
+  "LEASE_OWNERSHIP_MISMATCH",
 ] as const;
 
 export type SqliteStorageErrorCode = (typeof SQLITE_STORAGE_ERROR_CODES)[number];
@@ -50,5 +52,9 @@ function messageFor(code: SqliteStorageErrorCode): string {
       return "The Outbox lease is not owned by this dispatcher";
     case "OUTBOX_DELIVERY_FAILED":
       return "The Outbox delivery failed";
+    case "LEASE_CONFLICT":
+      return "The runtime write lease conflicts with an active owner";
+    case "LEASE_OWNERSHIP_MISMATCH":
+      return "The runtime write lease is not owned by the requested owner";
   }
 }

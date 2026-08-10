@@ -68,6 +68,9 @@ importers:
       '@agent-bridge/driver-protocol':
         specifier: workspace:*
         version: link:../../packages/driver-protocol
+      '@agent-bridge/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@agent-bridge/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas

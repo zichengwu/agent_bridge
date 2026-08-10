@@ -2,9 +2,10 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { JsonObject } from "@agent-bridge/driver-protocol";
+import { isDomainJsonValue, redactSensitiveContent } from "@agent-bridge/core";
 
 import { BridgeControlService } from "./bridge-control-service.js";
-import { BridgeControlError } from "./errors.js";
+import { BridgeControlError, classifyBridgeError } from "./errors.js";
 import { BRIDGE_TOOLS } from "./tool-contracts.js";
 
 export function createBridgeMcpServer(service: BridgeControlService): Server {
@@ -36,7 +37,7 @@ export function createBridgeMcpServer(service: BridgeControlService): Server {
           error_code: code,
         })
         .catch(() => undefined);
-      return response({ error: { code, details: errorDetails(error) } }, true);
+      return response({ error: { code, details: safeErrorDetails(error) } }, true);
     }
   });
   return server;
@@ -109,7 +110,7 @@ function serializableObject(value: unknown): Record<string, unknown> {
     : { value: JSON.parse(JSON.stringify(value)) as unknown };
 }
 
-function stableErrorCode(error: unknown): string {
+export function stableErrorCode(error: unknown): string {
   if (error instanceof BridgeControlError) return error.code;
   if (
     typeof error === "object" &&
@@ -121,15 +122,30 @@ function stableErrorCode(error: unknown): string {
   return "INTERNAL_ERROR";
 }
 
-function errorDetails(error: unknown): Readonly<Record<string, unknown>> {
-  if (error instanceof BridgeControlError) return error.details;
+export function safeErrorDetails(error: unknown): Readonly<Record<string, unknown>> {
+  const code = stableErrorCode(error);
+  const classification =
+    error instanceof BridgeControlError
+      ? { category: error.category, retryable: error.retryable }
+      : classifyBridgeError(code);
+  let details: unknown = {};
+  if (error instanceof BridgeControlError) details = error.details;
   if (
+    !(error instanceof BridgeControlError) &&
     typeof error === "object" &&
     error !== null &&
     "details" in error &&
     typeof error.details === "object" &&
     error.details !== null
   )
-    return error.details as Readonly<Record<string, unknown>>;
-  return {};
+    details = error.details;
+  const cloned = JSON.parse(JSON.stringify(details)) as unknown;
+  const safeDetails = isDomainJsonValue(cloned) ? redactSensitiveContent(cloned) : {};
+  return {
+    category: classification.category,
+    retryable: classification.retryable,
+    ...(typeof safeDetails === "object" && safeDetails !== null && !Array.isArray(safeDetails)
+      ? safeDetails
+      : {}),
+  };
 }

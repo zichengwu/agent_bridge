@@ -9,6 +9,7 @@ import type {
   AgentRole,
   AgentSessionBinding,
   ContextPackage,
+  DomainMetadata,
   TaskVersion,
 } from "@agent-bridge/schemas";
 
@@ -17,6 +18,7 @@ import { WorkerRuntimeError } from "./errors.js";
 import type { RuntimeAuditInput } from "./context-handoff-runtime.js";
 
 export interface RuntimeDriverHandle extends AgentDriver {
+  exportRecoveryState?(runId: string): Promise<import("@agent-bridge/driver-protocol").JsonObject>;
   close?(): Promise<unknown>;
 }
 
@@ -36,6 +38,7 @@ export interface StartSelectedRunRequest {
     | Extract<DriverSelectionDecision, { readonly action: "USE_PRIMARY" }>
     | ConfirmedFallbackSelection;
   readonly prepare_idempotency_key: string;
+  readonly runtime_metadata?: DomainMetadata;
   readonly create_audit: RuntimeAuditInput;
   readonly outcome_audit: RuntimeAuditInput;
   readonly session_event_id: string;
@@ -68,6 +71,54 @@ export class RunOrchestrator {
   async start(request: StartSelectedRunRequest): Promise<StartSelectedRunResult> {
     validateStartRequest(request);
     const driverId = request.selection.driver_id;
+    const existing = await this.repository.getAgentRun(request.run_id);
+    if (existing !== undefined) {
+      if (
+        existing.value.task_id !== request.task_version.task_id ||
+        existing.value.task_version !== request.task_version.task_version ||
+        existing.value.driver_id !== driverId ||
+        existing.value.role !== request.role
+      ) {
+        throw invalidRun("IDEMPOTENT_RUN_SCOPE_CONFLICT");
+      }
+      if (existing.value.status === "created") {
+        const failureCode = "START_OUTCOME_UNKNOWN";
+        const failed = failedRecord(existing.value, request.outcome_audit.occurred_at, failureCode);
+        await this.repository.commit({
+          change_id: `${request.outcome_audit.request_id}:reconcile`,
+          idempotency: {
+            operation: `${request.outcome_audit.operation}.reconcile`,
+            key: `${request.outcome_audit.idempotency_key}:reconcile`,
+            request_hash: computeContentHash({
+              run_id: request.run_id,
+              failure_code: failureCode,
+            }),
+          },
+          records: [{ kind: "agent_run", expected_revision: existing.revision, value: failed }],
+          events: [
+            {
+              ...runStatusEvent(request, existing.revision + 1, "failed", undefined, failureCode),
+              event_id: `${request.outcome_audit.event_id}:reconcile`,
+              audit: {
+                ...outcomeAudit(request),
+                operation: `${request.outcome_audit.operation}.reconcile`,
+                request_id: `${request.outcome_audit.request_id}:reconcile`,
+                idempotency_key: `${request.outcome_audit.idempotency_key}:reconcile`,
+              },
+            },
+          ],
+        });
+        return Object.freeze({ status: "START_FAILED", run: failed, failure_code: failureCode });
+      }
+      if (existing.value.status === "running" || existing.value.status === "waiting_permission") {
+        throw invalidRun("RUN_ALREADY_PERSISTED");
+      }
+      return Object.freeze({
+        status: "START_FAILED",
+        run: existing.value,
+        failure_code: "IDEMPOTENT_RUN_TERMINAL",
+      });
+    }
     const created: AgentRunRecord = {
       schema_version: request.task_version.schema_version,
       run_id: request.run_id,
@@ -81,6 +132,7 @@ export class RunOrchestrator {
       updated_at: request.create_audit.occurred_at,
       metadata: {
         driver_selection: selectionMetadata(request.selection),
+        ...request.runtime_metadata,
       },
     };
     await this.repository.commit({

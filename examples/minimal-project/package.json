@@ -1,0 +1,8 @@
+{
+  "name": "agent-bridge-minimal-project",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "verify": "node --test"
+  }
+}

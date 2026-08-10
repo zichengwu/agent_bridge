@@ -21,7 +21,10 @@ describe("选定 Driver 的新 Run 启动与审计", () => {
   it("持久化 Bridge Run、外部 Driver Run 映射和 Session Binding", async () => {
     const repository = new InMemoryDomainRepository();
     const driver = fakeDriver();
-    const request = startRequest();
+    const request = {
+      ...startRequest(),
+      runtime_metadata: { worktree_path: "/runtime/worktrees/task-1" },
+    };
     const result = await new RunOrchestrator(repository, [
       { driver_id: "opencode", create: () => Promise.resolve(driver) },
     ]).start(request);
@@ -32,7 +35,10 @@ describe("选定 Driver 的新 Run 启动与审计", () => {
       value: {
         status: "running",
         driver_id: "opencode",
-        metadata: { external_driver_run_id: "run-external" },
+        metadata: {
+          external_driver_run_id: "run-external",
+          worktree_path: "/runtime/worktrees/task-1",
+        },
       },
     });
     expect(await repository.getAgentSessionBinding("binding-1")).toMatchObject({
@@ -117,6 +123,78 @@ describe("选定 Driver 的新 Run 启动与审计", () => {
         },
       },
     });
+  });
+
+  it("已持久化 running Run 不会再次调用 Driver 启动副作用", async () => {
+    const repository = new InMemoryDomainRepository();
+    const create = vi.fn(() => Promise.resolve(fakeDriver()));
+    const orchestrator = new RunOrchestrator(repository, [{ driver_id: "opencode", create }]);
+    const request = startRequest();
+    await orchestrator.start(request);
+
+    await expect(orchestrator.start(request)).rejects.toMatchObject({
+      code: "DRIVER_SELECTION_INVALID",
+      details: { reason: "RUN_ALREADY_PERSISTED" },
+    });
+    expect(create).toHaveBeenCalledOnce();
+  });
+
+  it("崩溃遗留的 created Run 以 START_OUTCOME_UNKNOWN 失败收口且不盲目重启 Driver", async () => {
+    const repository = new InMemoryDomainRepository();
+    const request = startRequest();
+    const created = {
+      schema_version: DOMAIN_SCHEMA_VERSION,
+      run_id: request.run_id,
+      task_id: request.task_version.task_id,
+      task_version: request.task_version.task_version,
+      project_id: request.task_version.project_id,
+      driver_id: "opencode",
+      role: request.role,
+      status: "created" as const,
+      created_at: request.create_audit.occurred_at,
+      updated_at: request.create_audit.occurred_at,
+    };
+    await repository.commit({
+      change_id: request.create_audit.request_id,
+      idempotency: {
+        operation: request.create_audit.operation,
+        key: request.create_audit.idempotency_key,
+        request_hash: computeContentHash({ run_id: request.run_id }),
+      },
+      records: [{ kind: "agent_run", expected_revision: 0, value: created }],
+      events: [
+        {
+          event_id: request.create_audit.event_id,
+          event_version: 1,
+          event_type: "agent_run.created",
+          aggregate: { kind: "agent_run", id: request.run_id, revision: 1 },
+          occurred_at: request.create_audit.occurred_at,
+          audit: {
+            actor: request.create_audit.actor,
+            operation: request.create_audit.operation,
+            request_id: request.create_audit.request_id,
+            correlation_id: request.create_audit.correlation_id,
+            idempotency_key: request.create_audit.idempotency_key,
+            task_id: request.task_version.task_id,
+            task_version: request.task_version.task_version,
+            run_id: request.run_id,
+          },
+          payload: { status: "created" },
+        },
+      ],
+    });
+    const create = vi.fn(() => Promise.resolve(fakeDriver()));
+    const result = await new RunOrchestrator(repository, [{ driver_id: "opencode", create }]).start(
+      request,
+    );
+
+    expect(result).toMatchObject({
+      status: "START_FAILED",
+      failure_code: "START_OUTCOME_UNKNOWN",
+      run: { status: "failed" },
+    });
+    expect(create).not.toHaveBeenCalled();
+    expect(await repository.getAgentRun(request.run_id)).toMatchObject({ revision: 2 });
   });
 });
 

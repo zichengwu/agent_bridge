@@ -16,7 +16,7 @@ afterEach(async () => {
 });
 
 describe("SQLite migration", () => {
-  it("upgrades an existing verified v1 database to v2 without rewriting v1 metadata", async () => {
+  it("upgrades an existing verified v1 database through v3 without rewriting old metadata", async () => {
     const path = await databasePath();
     const legacy = new DatabaseSync(path);
     legacy.exec(`
@@ -37,12 +37,13 @@ describe("SQLite migration", () => {
     const upgraded = new DatabaseSync(path);
     expect(
       (upgraded.prepare("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(2);
+    ).toBe(3);
     expect(
       upgraded.prepare("SELECT version, name FROM schema_migrations ORDER BY version").all(),
     ).toEqual([
       { version: 1, name: "phase_2f_initial" },
       { version: 2, name: "phase_3_control_records" },
+      { version: 3, name: "phase_4_runtime_leases" },
     ]);
     expect(
       upgraded
@@ -77,6 +78,8 @@ describe("SQLite migration", () => {
         "outbox",
         "project_baselines",
         "review_cycles",
+        "runtime_leases",
+        "runtime_lease_resources",
         "schema_migrations",
         "tasks",
       ]),

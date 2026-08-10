@@ -526,7 +526,7 @@ function updateEventTypes(kind: DomainRecordKind): readonly AuthoritativeDomainE
     case "task":
       return ["task.status_changed", "task.updated"];
     case "agent_run":
-      return ["agent_run.status_changed"];
+      return ["agent_run.status_changed", "agent_run.updated"];
     case "agent_session_binding":
       return ["agent_session_binding.status_changed"];
     case "approval_request":

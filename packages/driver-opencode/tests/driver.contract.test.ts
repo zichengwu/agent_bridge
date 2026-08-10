@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DRIVER_PROTOCOL_VERSION,
+  asJsonObject,
   assertAgentEventSequence,
   type AgentEvent,
 } from "@agent-bridge/driver-protocol";
@@ -31,6 +32,8 @@ describe("OpenCode Driver Contract", () => {
       preparedTask: prepared,
       context: { contextPackageId: "context-1" },
     });
+    expect(() => asJsonObject(run)).not.toThrow();
+    expect(() => asJsonObject(driver.exportRecoveryState(run.runId))).not.toThrow();
     const iterator = driver.streamEvents(run.runId)[Symbol.asyncIterator]();
     const events: AgentEvent[] = [];
     events.push(await nextEvent(iterator));

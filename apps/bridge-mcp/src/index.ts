@@ -9,6 +9,7 @@ export * from "./bootstrap.js";
 export * from "./bridge-control-service.js";
 export * from "./errors.js";
 export * from "./local-runtime.js";
+export * from "./outbox-pump.js";
 export * from "./server.js";
 export * from "./tool-contracts.js";
 
