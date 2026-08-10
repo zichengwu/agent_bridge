@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { runStdioDriverHost, type DriverHostFactory } from "@agent-bridge/driver-protocol";
 
 import { createClaudeWorkerFactory } from "./worker-config.js";
+import { redactClaudeText } from "./errors.js";
 
 export interface ClaudeAgentWorkerEntryOptions {
   readonly input?: Readable;
@@ -15,12 +16,14 @@ export interface ClaudeAgentWorkerEntryOptions {
 }
 
 export function runClaudeAgentWorker(options: ClaudeAgentWorkerEntryOptions = {}): Promise<void> {
+  const secret = process.env.AGENT_BRIDGE_CLAUDE_AUTH_TOKEN;
   return runStdioDriverHost({
     hostId: "claude-agent-worker",
     input: options.input ?? process.stdin,
     output: options.output ?? process.stdout,
     diagnostics: options.diagnostics ?? process.stderr,
     factory: options.factory ?? createClaudeWorkerFactory(),
+    redactError: (value) => redactClaudeText(value, [], secret === undefined ? [] : [secret]),
   });
 }
 

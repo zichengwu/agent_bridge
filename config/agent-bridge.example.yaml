@@ -1,5 +1,5 @@
 # Agent Bridge MVP 本地运行时示例。不得填写真实凭据或 Agent 登录信息。
-schema_version: 1
+schema_version: 2
 
 project:
   id: example-project
@@ -18,20 +18,42 @@ context:
 drivers:
   primary:
     id: opencode
-    executable: /absolute/path/to/agent-bridge-driver-opencode
+    executable: /absolute/path/to/agent_bridge/packages/driver-opencode/bin/agent-bridge-driver-opencode.js
+    runtime_executable: /absolute/path/to/agent_bridge/packages/driver-opencode/node_modules/.bin/opencode
     args:
       - --stdio
     startup_timeout_ms: 30000
     request_timeout_ms: 10000
+    provider:
+      id: loopback
+      base_url: http://127.0.0.1:9000/v1
+      model: deterministic-model
+      permissions:
+        edit: ask
+        bash: deny
+        webfetch: deny
+        external_directory: deny
+    credentials:
+      source: environment
   fallback:
     id: claude-agent
     enabled: true
     # Claude 组件可暂时缺失；只有显式降级决策时才检查此路径。
-    executable: /absolute/path/to/agent-bridge-driver-claude-agent
+    executable: /absolute/path/to/agent_bridge/packages/driver-claude-agent/bin/agent-bridge-driver-claude-agent.js
     args:
       - --stdio
     startup_timeout_ms: 30000
     request_timeout_ms: 10000
+    provider:
+      id: loopback
+      base_url: http://127.0.0.1:9001
+      model: deterministic-model
+      tools:
+        - Edit
+      max_turns: 8
+      max_budget_usd: 0.12
+    credentials:
+      source: environment
 
 verification:
   max_output_bytes: 1048576

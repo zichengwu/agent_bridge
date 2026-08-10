@@ -6,10 +6,32 @@ import { WorkerRuntimeError } from "./errors.js";
 export interface RuntimeDriverConfiguration {
   readonly id: "opencode" | "claude-agent";
   readonly executable?: string;
+  readonly runtime_executable?: string;
   readonly args: readonly string[];
   readonly startup_timeout_ms: number;
   readonly request_timeout_ms: number;
+  readonly provider?: RuntimeProviderConfiguration;
+  readonly credentials?: RuntimeCredentialConfiguration;
 }
+
+export interface RuntimeProviderConfiguration {
+  readonly id: string;
+  readonly base_url: string;
+  readonly model: string;
+  readonly small_model?: string;
+  readonly permissions?: {
+    readonly edit?: "ask" | "allow" | "deny";
+    readonly bash?: "ask" | "allow" | "deny";
+    readonly webfetch?: "ask" | "allow" | "deny";
+    readonly external_directory?: "ask" | "allow" | "deny";
+  };
+  readonly tools?: readonly string[];
+  readonly max_turns?: number;
+  readonly max_budget_usd?: number;
+}
+
+export type RuntimeCredentialConfiguration =
+  { readonly source: "environment" } | { readonly source: "json_file"; readonly path: string };
 
 export interface VerificationCommandConfiguration {
   readonly contract: string;
@@ -19,7 +41,7 @@ export interface VerificationCommandConfiguration {
 }
 
 export interface AgentBridgeRuntimeConfiguration {
-  readonly schema_version: 1;
+  readonly schema_version: 1 | 2;
   readonly project: {
     readonly id: string;
     readonly workspace_root: string;
@@ -68,7 +90,7 @@ export function parseRuntimeConfiguration(value: unknown): AgentBridgeRuntimeCon
   onlyKeys(root, ["schema_version", "project", "limits", "context", "drivers", "verification"]);
   rejectSensitiveKeys(root);
   rejectCredentialValues(root);
-  if (root.schema_version !== 1) {
+  if (root.schema_version !== 1 && root.schema_version !== 2) {
     throw invalidConfig("CONFIG_VERSION_UNSUPPORTED");
   }
 
@@ -149,7 +171,7 @@ export function parseRuntimeConfiguration(value: unknown): AgentBridgeRuntimeCon
   }
 
   return Object.freeze({
-    schema_version: 1 as const,
+    schema_version: root.schema_version,
     project: Object.freeze({
       id: projectId,
       workspace_root: workspaceRoot,
@@ -187,19 +209,30 @@ function driverConfiguration(
   onlyKeys(driver, [
     "id",
     "executable",
+    "runtime_executable",
     "args",
     "startup_timeout_ms",
     "request_timeout_ms",
+    "provider",
+    "credentials",
     ...(allowEnabled ? ["enabled"] : []),
   ]);
   if (driver.id !== expectedId) {
     throw invalidConfig("DRIVER_ID_INVALID");
+  }
+  if ((driver.provider === undefined) !== (driver.credentials === undefined)) {
+    throw invalidConfig("PROVIDER_CREDENTIALS_REQUIRED");
   }
   return Object.freeze({
     id: expectedId,
     ...(driver.executable === undefined
       ? {}
       : { executable: absolutePath(driver.executable, "DRIVER_CONFIG_INVALID") }),
+    ...(driver.runtime_executable === undefined
+      ? {}
+      : {
+          runtime_executable: absolutePath(driver.runtime_executable, "DRIVER_CONFIG_INVALID"),
+        }),
     args: stringArray(driver.args, "DRIVER_CONFIG_INVALID"),
     startup_timeout_ms: boundedInteger(
       driver.startup_timeout_ms,
@@ -213,7 +246,98 @@ function driverConfiguration(
       120_000,
       "DRIVER_CONFIG_INVALID",
     ),
+    ...(driver.provider === undefined
+      ? {}
+      : { provider: providerConfiguration(driver.provider, expectedId) }),
+    ...(driver.credentials === undefined
+      ? {}
+      : { credentials: credentialConfiguration(driver.credentials) }),
   });
+}
+
+function providerConfiguration(
+  value: unknown,
+  driverId: RuntimeDriverConfiguration["id"],
+): RuntimeProviderConfiguration {
+  const provider = record(value, "PROVIDER_CONFIG_INVALID");
+  const common = ["id", "base_url", "model"];
+  const allowed =
+    driverId === "opencode"
+      ? [...common, "small_model", "permissions"]
+      : [...common, "tools", "max_turns", "max_budget_usd"];
+  onlyKeys(provider, allowed);
+  const id = identifier(provider.id, "PROVIDER_CONFIG_INVALID");
+  const baseUrl = httpUrl(provider.base_url, "PROVIDER_CONFIG_INVALID");
+  const model = nonEmptyString(provider.model, "PROVIDER_CONFIG_INVALID");
+  const result: RuntimeProviderConfiguration = {
+    id,
+    base_url: baseUrl,
+    model,
+  };
+  if (driverId === "opencode") {
+    const permissions =
+      provider.permissions === undefined ? undefined : providerPermissions(provider.permissions);
+    return Object.freeze({
+      ...result,
+      ...(provider.small_model === undefined
+        ? {}
+        : { small_model: nonEmptyString(provider.small_model, "PROVIDER_CONFIG_INVALID") }),
+      ...(permissions === undefined ? {} : { permissions }),
+    });
+  }
+  return Object.freeze({
+    ...result,
+    ...(provider.tools === undefined
+      ? {}
+      : { tools: stringArray(provider.tools, "PROVIDER_CONFIG_INVALID") }),
+    ...(provider.max_turns === undefined
+      ? {}
+      : { max_turns: boundedInteger(provider.max_turns, 1, 100, "PROVIDER_CONFIG_INVALID") }),
+    ...(provider.max_budget_usd === undefined
+      ? {}
+      : {
+          max_budget_usd: boundedNumber(
+            provider.max_budget_usd,
+            0,
+            1_000,
+            "PROVIDER_CONFIG_INVALID",
+          ),
+        }),
+  });
+}
+
+function credentialConfiguration(value: unknown): RuntimeCredentialConfiguration {
+  const credentials = record(value, "CREDENTIAL_CONFIG_INVALID");
+  if (credentials.source === "environment") {
+    onlyKeys(credentials, ["source"]);
+    return Object.freeze({ source: "environment" as const });
+  }
+  if (credentials.source === "json_file") {
+    onlyKeys(credentials, ["source", "path"]);
+    return Object.freeze({
+      source: "json_file" as const,
+      path: absolutePath(credentials.path, "CREDENTIAL_CONFIG_INVALID"),
+    });
+  }
+  throw invalidConfig("CREDENTIAL_CONFIG_INVALID");
+}
+
+function providerPermissions(
+  value: unknown,
+): NonNullable<RuntimeProviderConfiguration["permissions"]> {
+  const permissions = record(value, "PROVIDER_CONFIG_INVALID");
+  onlyKeys(permissions, ["edit", "bash", "webfetch", "external_directory"]);
+  const result: Record<string, "ask" | "allow" | "deny"> = {};
+  for (const key of ["edit", "bash", "webfetch", "external_directory"] as const) {
+    const setting = permissions[key];
+    if (setting !== undefined) {
+      if (setting !== "ask" && setting !== "allow" && setting !== "deny") {
+        throw invalidConfig("PROVIDER_CONFIG_INVALID");
+      }
+      result[key] = setting;
+    }
+  }
+  return Object.freeze(result);
 }
 
 function parseStrictYaml(source: string): unknown {
@@ -341,7 +465,7 @@ function rejectSensitiveKeys(value: unknown): void {
     return;
   }
   for (const [key, nested] of Object.entries(value)) {
-    if (/(?:api[_-]?key|token|secret|password|authorization|credential)/iu.test(key)) {
+    if (/(?:api[_-]?key|token|secret|password|authorization)/iu.test(key)) {
       throw invalidConfig("CONFIG_CREDENTIAL_FIELD_FORBIDDEN");
     }
     rejectSensitiveKeys(nested);
@@ -387,6 +511,31 @@ function identifier(value: unknown, reason: string): string {
 
 function nonEmptyString(value: unknown, reason: string): string {
   if (typeof value !== "string" || value.length === 0 || value.length > 4_096) {
+    throw invalidConfig(reason);
+  }
+  return value;
+}
+
+function httpUrl(value: unknown, reason: string): string {
+  const text = nonEmptyString(value, reason);
+  let parsed: URL;
+  try {
+    parsed = new URL(text);
+  } catch {
+    throw invalidConfig(reason);
+  }
+  if (
+    (parsed.protocol !== "https:" && parsed.protocol !== "http:") ||
+    parsed.username ||
+    parsed.password
+  ) {
+    throw invalidConfig(reason);
+  }
+  return parsed.href.replace(/\/$/u, "");
+}
+
+function boundedNumber(value: unknown, min: number, max: number, reason: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) {
     throw invalidConfig(reason);
   }
   return value;

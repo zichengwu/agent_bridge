@@ -10,6 +10,8 @@
   "scripts": {
     "build": "tsc -b",
     "bridge:mcp": "node apps/bridge-mcp/dist/index.js",
+    "bridge:preflight": "node apps/bridge-mcp/dist/runtime-tools.js preflight",
+    "bridge:content-hash": "node apps/bridge-mcp/dist/runtime-tools.js content-hash",
     "clean": "tsc -b --clean",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -37,6 +39,7 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration --passWithNoTests",
     "test:e2e": "vitest run tests/e2e --passWithNoTests",
+    "test:e2e:phase4.1": "vitest run tests/e2e/phase-4-1-loopback.test.ts",
     "test:security": "vitest run tests/security --passWithNoTests",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },

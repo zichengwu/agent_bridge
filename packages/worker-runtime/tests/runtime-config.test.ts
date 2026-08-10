@@ -77,6 +77,55 @@ describe("Phase 2G 严格运行时配置", () => {
       "/definitely/missing/claude-driver",
     );
   });
+
+  it("接受 schema v2 的严格非敏感 Provider 与凭据来源合同", () => {
+    const config = configuration();
+    Object.assign(config, { schema_version: 2 });
+    Object.assign(config.drivers.primary, {
+      runtime_executable: "/drivers/opencode-runtime",
+      provider: {
+        id: "deepseek",
+        base_url: "http://127.0.0.1:8080/v1",
+        model: "deepseek-v4-pro",
+        permissions: { edit: "ask", bash: "deny" },
+      },
+      credentials: { source: "environment" },
+    });
+
+    expect(parseRuntimeConfiguration(config).drivers.primary).toMatchObject({
+      runtime_executable: "/drivers/opencode-runtime",
+      provider: { id: "deepseek", model: "deepseek-v4-pro" },
+      credentials: { source: "environment" },
+    });
+  });
+
+  it("拒绝 Provider 与凭据来源不完整或 Provider 中的秘密字段", () => {
+    const missingCredentials = configuration();
+    Object.assign(missingCredentials.drivers.primary, {
+      provider: {
+        id: "deepseek",
+        base_url: "https://api.example.invalid/v1",
+        model: "model",
+      },
+    });
+    expect(() => parseRuntimeConfiguration(missingCredentials)).toThrowError(
+      expect.objectContaining({ code: "RUNTIME_CONFIG_INVALID" }),
+    );
+
+    const secret = configuration();
+    Object.assign(secret.drivers.primary, {
+      provider: {
+        id: "deepseek",
+        base_url: "https://api.example.invalid/v1",
+        model: "model",
+        api_key: "forbidden",
+      },
+      credentials: { source: "environment" },
+    });
+    expect(() => parseRuntimeConfiguration(secret)).toThrowError(
+      expect.objectContaining({ code: "RUNTIME_CONFIG_INVALID" }),
+    );
+  });
 });
 
 function configuration() {

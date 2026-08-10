@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schema/runtime-config-v2.json",
+  "title": "Agent Bridge runtime configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project", "limits", "context", "drivers", "verification"],
+  "properties": {
+    "schema_version": { "enum": [1, 2] },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "workspace_root", "runtime_root", "project_baseline_path"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "workspace_root": { "$ref": "#/$defs/absolutePath" },
+        "runtime_root": { "$ref": "#/$defs/absolutePath" },
+        "project_baseline_path": { "$ref": "#/$defs/absolutePath" }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeout_seconds", "max_review_cycles", "max_agent_count"],
+      "properties": {
+        "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 3600 },
+        "max_review_cycles": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "max_agent_count": { "type": "integer", "minimum": 1, "maximum": 4 }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rollover_ratio"],
+      "properties": {
+        "rollover_ratio": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.7 }
+      }
+    },
+    "drivers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary", "fallback"],
+      "properties": {
+        "primary": { "$ref": "#/$defs/openCodeDriver" },
+        "fallback": { "$ref": "#/$defs/claudeDriver" }
+      }
+    },
+    "verification": { "$ref": "#/$defs/verification" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "absolutePath": { "type": "string", "pattern": "^/" },
+    "credentialSource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source"],
+          "properties": { "source": { "const": "environment" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source", "path"],
+          "properties": {
+            "source": { "const": "json_file" },
+            "path": { "$ref": "#/$defs/absolutePath" }
+          }
+        }
+      ]
+    },
+    "permission": { "enum": ["ask", "allow", "deny"] },
+    "openCodeProvider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "base_url", "model"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "base_url": { "type": "string", "format": "uri", "pattern": "^https?://" },
+        "model": { "type": "string", "minLength": 1 },
+        "small_model": { "type": "string", "minLength": 1 },
+        "permissions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "edit": { "$ref": "#/$defs/permission" },
+            "bash": { "$ref": "#/$defs/permission" },
+            "webfetch": { "$ref": "#/$defs/permission" },
+            "external_directory": { "$ref": "#/$defs/permission" }
+          }
+        }
+      }
+    },
+    "claudeProvider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "base_url", "model"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "base_url": { "type": "string", "format": "uri", "pattern": "^https?://" },
+        "model": { "type": "string", "minLength": 1 },
+        "tools": { "type": "array", "items": { "type": "string" } },
+        "max_turns": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "max_budget_usd": { "type": "number", "minimum": 0, "maximum": 1000 }
+      }
+    },
+    "driverBase": {
+      "type": "object",
+      "required": ["id", "args", "startup_timeout_ms", "request_timeout_ms"],
+      "properties": {
+        "executable": { "$ref": "#/$defs/absolutePath" },
+        "runtime_executable": { "$ref": "#/$defs/absolutePath" },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "startup_timeout_ms": { "type": "integer", "minimum": 1, "maximum": 120000 },
+        "request_timeout_ms": { "type": "integer", "minimum": 1, "maximum": 120000 },
+        "credentials": { "$ref": "#/$defs/credentialSource" }
+      }
+    },
+    "openCodeDriver": {
+      "allOf": [
+        { "$ref": "#/$defs/driverBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "executable", "args", "startup_timeout_ms", "request_timeout_ms"],
+          "dependentRequired": {
+            "provider": ["credentials"],
+            "credentials": ["provider"]
+          },
+          "properties": {
+            "id": { "const": "opencode" },
+            "executable": true,
+            "runtime_executable": true,
+            "args": true,
+            "startup_timeout_ms": true,
+            "request_timeout_ms": true,
+            "provider": { "$ref": "#/$defs/openCodeProvider" },
+            "credentials": true
+          }
+        }
+      ]
+    },
+    "claudeDriver": {
+      "allOf": [
+        { "$ref": "#/$defs/driverBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "enabled", "args", "startup_timeout_ms", "request_timeout_ms"],
+          "dependentRequired": {
+            "provider": ["credentials"],
+            "credentials": ["provider"]
+          },
+          "if": {
+            "properties": { "enabled": { "const": true } },
+            "required": ["enabled"]
+          },
+          "then": { "required": ["executable"] },
+          "properties": {
+            "id": { "const": "claude-agent" },
+            "enabled": { "type": "boolean" },
+            "executable": true,
+            "runtime_executable": true,
+            "args": true,
+            "startup_timeout_ms": true,
+            "request_timeout_ms": true,
+            "provider": { "$ref": "#/$defs/claudeProvider" },
+            "credentials": true
+          }
+        }
+      ]
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_output_bytes", "termination_grace_ms", "commands"],
+      "properties": {
+        "max_output_bytes": { "type": "integer", "minimum": 1, "maximum": 16777216 },
+        "termination_grace_ms": { "type": "integer", "minimum": 1, "maximum": 60000 },
+        "commands": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["contract", "executable", "args", "timeout_seconds"],
+            "properties": {
+              "contract": { "type": "string", "minLength": 1 },
+              "executable": { "$ref": "#/$defs/absolutePath" },
+              "args": { "type": "array", "items": { "type": "string" } },
+              "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 3600 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

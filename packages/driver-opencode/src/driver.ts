@@ -59,6 +59,7 @@ export interface OpenCodeDriverOptions {
   readonly now?: () => Date;
   readonly createRunId?: () => string;
   readonly recoveryStates?: readonly OpenCodeDriverRecoveryState[];
+  readonly privateValues?: readonly string[];
 }
 
 export interface CreateOpenCodeDriverOptions
@@ -465,7 +466,8 @@ export class OpenCodeDriver implements AgentDriver {
   }
 
   private append(record: RunRecord, events: readonly AgentEvent[]): void {
-    for (const event of events) {
+    for (const unsafeEvent of events) {
+      const event = redactEvent(unsafeEvent, this.options.privateValues ?? []);
       if (event.type === "output.delta") {
         record.output.push(event.delta);
       }
@@ -517,8 +519,8 @@ export class OpenCodeDriver implements AgentDriver {
             text: record.output.join(""),
           },
           artifacts: [],
-          usage: record.tokenUsage,
-          error: event.type === "run.failed" ? event.error : undefined,
+          ...(record.tokenUsage === undefined ? {} : { usage: record.tokenUsage }),
+          ...(event.type === "run.failed" ? { error: event.error } : {}),
           completedAt: event.occurredAt,
         };
         record.events.close();
@@ -615,6 +617,26 @@ export class OpenCodeDriver implements AgentDriver {
       tokenUsage: state.tokenUsage === undefined ? undefined : structuredClone(state.tokenUsage),
     });
   }
+}
+
+function redactEvent(event: AgentEvent, privateValues: readonly string[]): AgentEvent {
+  if (privateValues.length === 0) return event;
+  const redact = (value: unknown): unknown => {
+    if (typeof value === "string") {
+      return privateValues.reduce(
+        (text, secret) => (secret.length === 0 ? text : text.replaceAll(secret, "[REDACTED]")),
+        value,
+      );
+    }
+    if (Array.isArray(value)) return value.map(redact);
+    if (typeof value === "object" && value !== null) {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, nested]) => [key, redact(nested)]),
+      );
+    }
+    return value;
+  };
+  return redact(event) as AgentEvent;
 }
 
 export async function createOpenCodeDriver(

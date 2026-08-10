@@ -10,14 +10,24 @@ describe("OpenCode Worker 配置边界", () => {
         port: 4_321,
         timeoutMs: 1_000,
         executablePath: "/opt/opencode/bin/opencode",
-        provider: { model: "fixture/model", enabledProviders: [] },
+        provider: {
+          id: "fixture",
+          baseUrl: "http://127.0.0.1:9/v1",
+          model: "fixture-model",
+          permissions: { edit: "ask" },
+        },
       }),
     ).toEqual({
       hostname: "127.0.0.1",
       port: 4_321,
       timeoutMs: 1_000,
       executablePath: "/opt/opencode/bin/opencode",
-      provider: { model: "fixture/model", enabledProviders: [] },
+      provider: {
+        id: "fixture",
+        baseUrl: "http://127.0.0.1:9/v1",
+        model: "fixture-model",
+        permissions: { edit: "ask" },
+      },
     });
   });
 

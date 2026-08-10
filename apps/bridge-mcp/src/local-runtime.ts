@@ -30,6 +30,8 @@ import {
   IndependentVerificationRunner,
   type LeaseManager,
   ProcessSupervisor,
+  resolveDriverCredentialEnvironment,
+  resolveGitRepositoryRoot,
   RunOrchestrator,
   StdioAgentDriverClient,
   hasRequiredCapabilities,
@@ -575,6 +577,69 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
     await Promise.all(Object.values(isolation).map((path) => mkdir(path, { recursive: true })));
     const path = process.env.PATH ?? "/usr/bin:/bin";
     const lang = process.env.LANG ?? "C.UTF-8";
+    const credentialEnvironment = await resolveDriverCredentialEnvironment(config, {
+      repositoryRoot: await resolveGitRepositoryRoot(this.configuration.project.workspace_root),
+      workspaceRoot: this.configuration.project.workspace_root,
+      runtimeRoot: this.configuration.project.runtime_root,
+    });
+    const provider = config.provider;
+    const driverConfiguration =
+      config.id === "opencode"
+        ? {
+            ...(config.runtime_executable === undefined
+              ? {}
+              : { executablePath: config.runtime_executable }),
+            ...(provider === undefined
+              ? {}
+              : {
+                  provider: {
+                    id: provider.id,
+                    baseUrl: provider.base_url,
+                    model: provider.model,
+                    ...(provider.small_model === undefined
+                      ? {}
+                      : { smallModel: provider.small_model }),
+                    ...(provider.permissions === undefined
+                      ? {}
+                      : {
+                          permissions: {
+                            ...(provider.permissions.edit === undefined
+                              ? {}
+                              : { edit: provider.permissions.edit }),
+                            ...(provider.permissions.bash === undefined
+                              ? {}
+                              : { bash: provider.permissions.bash }),
+                            ...(provider.permissions.webfetch === undefined
+                              ? {}
+                              : { webfetch: provider.permissions.webfetch }),
+                            ...(provider.permissions.external_directory === undefined
+                              ? {}
+                              : {
+                                  externalDirectory: provider.permissions.external_directory,
+                                }),
+                          },
+                        }),
+                  },
+                }),
+          }
+        : {
+            isolation: { ...isolation, path, lang },
+            ...(config.runtime_executable === undefined
+              ? {}
+              : { pathToClaudeCodeExecutable: config.runtime_executable }),
+            ...(provider === undefined
+              ? {}
+              : {
+                  provider: { baseUrl: provider.base_url, model: provider.model },
+                  security: {
+                    ...(provider.tools === undefined ? {} : { tools: provider.tools }),
+                    ...(provider.max_turns === undefined ? {} : { maxTurns: provider.max_turns }),
+                    ...(provider.max_budget_usd === undefined
+                      ? {}
+                      : { maxBudgetUsd: provider.max_budget_usd }),
+                  },
+                }),
+          };
     return StdioAgentDriverClient.start({
       supervisor: new ProcessSupervisor(),
       process: {
@@ -591,14 +656,14 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
           CLAUDE_CONFIG_DIR: isolation.claudeConfigDirectory,
           PATH: path,
           LANG: lang,
+          ...credentialEnvironment,
         },
         timeoutMs: this.configuration.limits.timeout_seconds * 1_000,
         terminationGraceMs: this.configuration.verification.termination_grace_ms,
       },
       initialization: {
         workDirectory,
-        configuration:
-          config.id === "claude-agent" ? { isolation: { ...isolation, path, lang } } : {},
+        configuration: driverConfiguration,
         ...(recoveryStates === undefined ? {} : { recoveryStates }),
       },
       requestTimeoutMs: config.request_timeout_ms,

@@ -70,8 +70,8 @@ Agent Bridge 的领域核心必须保持 Driver 中立，不能直接依赖某�
 
 ## 后续工作
 
-1. 固化正式 Driver Contract、能力声明、事件映射和 Contract 测试。
-2. 创建独立 `driver-opencode` 与 `driver-claude-agent` 包，禁止供应商 SDK 泄漏到 `packages/core`。
-3. 将可复现且无凭据的 Spike 场景迁移为正式兼容性测试。
+1. 正式 Driver Contract、能力声明、事件映射、Contract 测试和两个独立 Driver 包已经完成；继续禁止供应商 SDK 泄漏到 `packages/core`。
+2. Phase 4.1 使用版本化非敏感 Provider 配置；秘密只通过 Driver 专属环境 allowlist 或严格 JSON 文件在 Bridge 子进程边界注入，不进入 Driver Protocol JSONL。
+3. B-simulated、正式产品 loopback E2E 与 B-real 分别保留证据，禁止互相替代；macOS 禁止嵌套 `sandbox-exec` 时，以明确探针结果和正式产品路径 E2E 共同报告。
 4. 保留真实 Provider 测试的逐次授权、费用上限、网络白名单、脱敏和清理门禁。
 5. 后续评估使用不同 Provider 的灾备 Driver，不把当前 Driver 级降级宣传为 Provider 级高可用。
