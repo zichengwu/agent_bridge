@@ -15,6 +15,7 @@ import {
   type ArtifactDomainReference,
   type ArtifactReferenceQuery,
   type ArtifactReferenceRepository,
+  type AgentRunRecord,
   type AuthoritativeDomainEvent,
   type DomainEventPage,
   type DomainEventQuery,
@@ -44,6 +45,7 @@ import type {
 import { SqliteStorageError } from "./errors.js";
 import { migrateSqliteDatabase } from "./migrations.js";
 import { SqliteOutboxDispatcher, type OutboxDispatcherOptions } from "./outbox.js";
+import { SqliteLeaseManager, type SqliteLeaseManagerOptions } from "./sqlite-lease-manager.js";
 
 export interface SqliteDomainRepositoryOptions {
   readonly database_path: string;
@@ -140,6 +142,11 @@ export class SqliteDomainRepository implements DomainRepository, ArtifactReferen
   createOutboxDispatcher(options: OutboxDispatcherOptions): SqliteOutboxDispatcher {
     this.assertOpen();
     return new SqliteOutboxDispatcher(this.database, options);
+  }
+
+  createLeaseManager(options: SqliteLeaseManagerOptions = {}): SqliteLeaseManager {
+    this.assertOpen();
+    return new SqliteLeaseManager(this.database, options);
   }
 
   async commit(value: DomainWriteRequest): Promise<DomainWriteResult> {
@@ -1029,6 +1036,8 @@ function extractArtifactReferences(
       )?.occurred_at ?? new Date(0).toISOString();
     if (record.write.kind === "task_result") {
       collectTaskResultReferences(references, record, record.write.value, createdAt);
+    } else if (record.write.kind === "agent_run") {
+      collectAgentRunReferences(references, record, record.write.value, createdAt);
     } else if (record.write.kind === "handoff_package") {
       collectHandoffReferences(references, record, record.write.value, createdAt);
     } else if (record.write.kind === "continuation_snapshot") {
@@ -1036,6 +1045,31 @@ function extractArtifactReferences(
     }
   }
   return Object.freeze(references);
+}
+
+function collectAgentRunReferences(
+  target: ArtifactDomainReference[],
+  record: PreparedRecord,
+  value: AgentRunRecord,
+  createdAt: string,
+): void {
+  const checkpoint = value.metadata?.recovery_checkpoint;
+  if (typeof checkpoint !== "object" || checkpoint === null || Array.isArray(checkpoint)) {
+    return;
+  }
+  const reference = checkpoint as {
+    readonly [key: string]: import("@agent-bridge/schemas").DomainJsonValue;
+  };
+  if (typeof reference.artifact_id !== "string") return;
+  target.push(
+    artifactReference(
+      record,
+      reference.artifact_id,
+      "/metadata/recovery_checkpoint/artifact_id",
+      createdAt,
+      typeof reference.content_hash === "string" ? reference.content_hash : undefined,
+    ),
+  );
 }
 
 function collectTaskResultReferences(

@@ -85,6 +85,11 @@ export function scanSensitiveContent(value: DomainJsonValue): readonly Sensitive
   return Object.freeze(findings.map((finding) => Object.freeze({ ...finding })));
 }
 
+/** Produces a persistence-safe JSON value without credential or transcript fields. */
+export function redactSensitiveContent(value: DomainJsonValue): DomainJsonValue {
+  return redactValue(value);
+}
+
 export function isDomainJsonValue(value: unknown): value is DomainJsonValue {
   return isJsonValue(value, new Set<object>());
 }
@@ -157,6 +162,37 @@ function scanValue(
     }
     scanValue(item, itemPath, findings);
   }
+}
+
+function redactValue(value: DomainJsonValue): DomainJsonValue {
+  if (typeof value === "string") {
+    return CREDENTIAL_PATTERNS.reduce(
+      (redacted, pattern) => redacted.replace(new RegExp(pattern.source, "gu"), "[REDACTED]"),
+      value,
+    );
+  }
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) {
+    const items = value as readonly DomainJsonValue[];
+    return items.map((item) => redactValue(item));
+  }
+
+  const redacted: Record<string, DomainJsonValue> = {};
+  const removed: string[] = [];
+  for (const [key, item] of Object.entries(value)) {
+    const normalizedKey = normalizeFieldName(key);
+    if (
+      isCredentialFieldName(normalizedKey) ||
+      FULL_TRANSCRIPT_FIELD_NAMES.has(normalizedKey) ||
+      INTERNAL_REASONING_FIELD_NAMES.has(normalizedKey)
+    ) {
+      removed.push(key);
+      continue;
+    }
+    redacted[key] = redactValue(item);
+  }
+  if (removed.length > 0) redacted.redacted_fields = removed.sort();
+  return redacted;
 }
 
 function escapeJsonPointer(value: string): string {

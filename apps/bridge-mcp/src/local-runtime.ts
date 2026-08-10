@@ -1,15 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, realpath } from "node:fs/promises";
+import { basename, resolve } from "node:path";
 
 import {
   assembleContextPackage,
   computeContentHash,
   computeDocumentContentHash,
+  redactSensitiveContent,
+  transitionAgentRunStatus,
   transitionAgentSessionBinding,
+  transitionTask,
+  type ArtifactRepository,
   type DomainRepository,
 } from "@agent-bridge/core";
-import { LocalArtifactRepository } from "@agent-bridge/artifacts-local";
 import { DRIVER_PROTOCOL_VERSION, asJsonObject } from "@agent-bridge/driver-protocol";
 import {
   DOMAIN_SCHEMA_VERSION,
@@ -24,8 +27,8 @@ import {
   ActiveRunRegistry,
   DefaultGitClient,
   GitWorktreeManager,
-  InMemoryLeaseManager,
   IndependentVerificationRunner,
+  type LeaseManager,
   ProcessSupervisor,
   RunOrchestrator,
   StdioAgentDriverClient,
@@ -44,11 +47,12 @@ import type {
 } from "./bridge-control-service.js";
 import { controlError } from "./errors.js";
 
-type EventListener = (event: import("@agent-bridge/driver-protocol").AgentEvent) => Promise<void>;
+type AgentEvent = import("@agent-bridge/driver-protocol").AgentEvent;
+type EventListener = (runId: string, event: AgentEvent) => Promise<void>;
 
 export class LocalBridgeRuntime implements BridgeRuntimePort {
   private readonly git = new DefaultGitClient({ executable: "/usr/bin/git" });
-  private readonly worktrees = new GitWorktreeManager(this.git, new InMemoryLeaseManager());
+  private readonly worktrees: GitWorktreeManager;
   private listener?: EventListener;
   private readonly runWorktrees = new Map<
     string,
@@ -59,10 +63,35 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
     private readonly repository: DomainRepository,
     private readonly activeRuns: ActiveRunRegistry,
     private readonly configuration: AgentBridgeRuntimeConfiguration,
-  ) {}
+    leases: LeaseManager,
+    private readonly artifacts: ArtifactRepository,
+  ) {
+    this.worktrees = new GitWorktreeManager(this.git, leases);
+  }
 
   setEventListener(listener: EventListener): void {
     this.listener = listener;
+  }
+
+  async recoverPersistedRuns(): Promise<void> {
+    const candidates = await this.repository.listRecoveryCandidates({
+      project_id: this.configuration.project.id,
+    });
+    for (const candidate of candidates) {
+      try {
+        await this.recoverPersistedRun(candidate.value.run_id);
+      } catch (error) {
+        await this.interruptRecoveryCandidate(
+          candidate.value.run_id,
+          recoveryFailureCode(error),
+          recoveryFailureStage(error),
+        );
+      }
+    }
+  }
+
+  async cleanupResources(runId: string, reason: string): Promise<void> {
+    await this.cleanupTerminalResources(runId, reason);
   }
 
   async start(request: BridgeStartRequest): Promise<BridgeStartResult> {
@@ -71,7 +100,7 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
       throw controlError("CONTEXT_PACKAGE_SCOPE_INVALID");
     }
     const existing = await this.repository.getAgentRun(context.value.run_id);
-    if (existing?.value.status === "running") {
+    if (existing?.value.status === "running" && this.activeRuns.get(existing.value.run_id)) {
       const bindings = await this.repository.listAgentSessionBindings(existing.value.run_id);
       const binding = bindings.find((item) => item.value.status === "ACTIVE");
       if (binding === undefined) throw controlError("SESSION_BINDING_INVALID");
@@ -90,7 +119,7 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
       pending === undefined ? undefined : this.worktrees.getOwnership(pending.path);
     const ownership =
       existingOwnership ??
-      (await this.worktrees.create({
+      (await this.worktrees.ensure({
         repositoryPath: this.configuration.project.workspace_root,
         worktreesRoot,
         worktreeName: `${request.task_version.task_id}-v${request.task_version.task_version}-${runId.slice(0, 8)}`,
@@ -238,6 +267,13 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
         role: request.task_version.role,
         selection,
         prepare_idempotency_key: `${request.idempotency_key}:prepare`,
+        runtime_metadata: {
+          worktree_path: ownership.worktreePath,
+          worktree_branch: ownership.branch,
+          worktree_base_commit: ownership.baseCommit,
+          lease_id: ownership.lease.leaseId,
+          lease_expires_at: ownership.lease.expiresAt,
+        },
         create_audit: audit("bridge_start_task_create", `${request.idempotency_key}:create`, now),
         outcome_audit: audit(
           "bridge_start_task_outcome",
@@ -255,7 +291,16 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
           external_session_id: result.external.session.externalSessionId,
           driver: result.driver,
         },
-        this.listener === undefined ? undefined : async (_run, event) => this.listener?.(event),
+        this.listener === undefined
+          ? undefined
+          : async (active, driverEvent) => {
+              try {
+                await this.handleAgentEvent(active, driverEvent);
+              } catch (error) {
+                await this.interruptRecoveryCandidate(active.run_id, recoveryFailureCode(error));
+                throw error;
+              }
+            },
       );
       return {
         run_id: runId,
@@ -456,12 +501,9 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
       this.git.run(managed.path, ["rev-parse", "--verify", "HEAD"]),
     ]);
     if (result.status !== "succeeded") throw controlError("DRIVER_RESULT_INVALID");
-    const artifacts = await LocalArtifactRepository.open({
-      root_path: resolve(this.configuration.project.runtime_root, "artifacts"),
-    });
     const verification = await new IndependentVerificationRunner(
       new ProcessSupervisor(),
-      artifacts,
+      this.artifacts,
     ).start({
       verification_id: stableId("verification", runId),
       run_id: runId,
@@ -514,6 +556,7 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
   private async createDriver(
     workDirectory: string,
     config: RuntimeDriverConfiguration,
+    recoveryStates?: readonly import("@agent-bridge/driver-protocol").JsonObject[],
   ): Promise<StdioAgentDriverClient> {
     const isolationRoot = resolve(
       this.configuration.project.runtime_root,
@@ -556,9 +599,547 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
         workDirectory,
         configuration:
           config.id === "claude-agent" ? { isolation: { ...isolation, path, lang } } : {},
+        ...(recoveryStates === undefined ? {} : { recoveryStates }),
       },
       requestTimeoutMs: config.request_timeout_ms,
     });
+  }
+
+  private async recoverPersistedRun(runId: string): Promise<void> {
+    const run = await this.repository.getAgentRun(runId);
+    if (run === undefined || run.value.status !== "running") {
+      throw recoveryDenied("RUN_NOT_RUNNING");
+    }
+    const [taskVersion, bindings] = await Promise.all([
+      this.repository.getTaskVersion({
+        task_id: run.value.task_id,
+        task_version: run.value.task_version,
+      }),
+      this.repository.listAgentSessionBindings(runId),
+    ]);
+    const activeBindings = bindings.filter((item) => item.value.status === "ACTIVE");
+    const binding = activeBindings[0];
+    if (
+      taskVersion === undefined ||
+      taskVersion.value.project_id !== run.value.project_id ||
+      activeBindings.length !== 1 ||
+      binding === undefined ||
+      binding.value.task_id !== run.value.task_id ||
+      binding.value.task_version !== run.value.task_version ||
+      binding.value.run_id !== runId ||
+      binding.value.driver_id !== run.value.driver_id ||
+      binding.value.role !== run.value.role
+    )
+      throw recoveryDenied("PERSISTED_SCOPE_MISMATCH");
+
+    const worktreePath = metadataString(run.value.metadata, "worktree_path");
+    const checkpoint = metadataRecord(run.value.metadata, "recovery_checkpoint");
+    const artifactId = metadataString(checkpoint, "artifact_id");
+    const contentHash = metadataString(checkpoint, "content_hash");
+    const externalRunId =
+      metadataString(checkpoint, "external_run_id") ??
+      metadataString(run.value.metadata, "external_driver_run_id");
+    const externalSessionId =
+      metadataString(binding.value.metadata, "external_driver_session_id") ??
+      binding.value.external_session_id;
+    if (
+      worktreePath === undefined ||
+      artifactId === undefined ||
+      contentHash === undefined ||
+      externalRunId === undefined
+    ) {
+      throw recoveryDenied("CHECKPOINT_POINTER_MISSING");
+    }
+    const artifactMetadata = await this.artifacts.getMetadata(artifactId);
+    if (
+      artifactMetadata?.content_hash !== contentHash ||
+      artifactMetadata.kind !== "driver.recovery-checkpoint" ||
+      artifactMetadata.media_type !== "application/json"
+    )
+      throw recoveryDenied("CHECKPOINT_METADATA_INVALID");
+    const recoveryState = await readJsonArtifact(this.artifacts, artifactId);
+    if (metadataString(recoveryState, "runId") !== externalRunId) {
+      throw recoveryDenied("CHECKPOINT_RUN_MISMATCH");
+    }
+
+    const worktreesRoot = resolve(this.configuration.project.runtime_root, "worktrees");
+    const [canonicalWorktreePath, canonicalWorktreesRoot] = await Promise.all([
+      realpath(worktreePath),
+      realpath(worktreesRoot),
+    ]);
+    if (canonicalWorktreePath !== resolve(canonicalWorktreesRoot, basename(worktreePath))) {
+      throw recoveryDenied("WORKTREE_PATH_INVALID");
+    }
+    const ownership = await this.worktrees.adopt({
+      repositoryPath: this.configuration.project.workspace_root,
+      worktreesRoot,
+      worktreeName: basename(worktreePath),
+      branch: taskVersion.value.git.branch,
+      sourceRef: "HEAD",
+      baseCommit: taskVersion.value.base_commit,
+      taskId: taskVersion.value.task_id,
+      taskVersion: taskVersion.value.task_version,
+      runId,
+      leaseTtlMs: taskVersion.value.limits.timeout_seconds * 1_000,
+    });
+    try {
+      await this.worktrees.validateDiff({
+        worktreePath: ownership.worktreePath,
+        baseCommit: taskVersion.value.base_commit,
+        ownerId: runId,
+        role: taskVersion.value.role,
+        scope: taskVersion.value.scope,
+      });
+      const driverConfig =
+        run.value.driver_id === this.configuration.drivers.primary.id
+          ? this.configuration.drivers.primary
+          : this.configuration.drivers.fallback;
+      if (
+        driverConfig.id !== run.value.driver_id ||
+        (driverConfig.id === "claude-agent" && !driverConfig.enabled) ||
+        driverConfig.executable === undefined
+      ) {
+        throw recoveryDenied("DRIVER_CONFIGURATION_MISMATCH");
+      }
+      const driver = await this.createDriver(ownership.worktreePath, driverConfig, [recoveryState]);
+      try {
+        const [health, capabilities] = await Promise.all([
+          driver.healthCheck(),
+          driver.describeCapabilities(),
+        ]);
+        if (
+          health.status !== "healthy" ||
+          capabilities.driver.id !== run.value.driver_id ||
+          !hasRequiredCapabilities(capabilities) ||
+          !capabilities.sessions.resume
+        ) {
+          throw recoveryDenied("DRIVER_CAPABILITY_MISMATCH");
+        }
+        const resumed = await driver.resumeTask({
+          protocolVersion: DRIVER_PROTOCOL_VERSION,
+          runId: externalRunId,
+          sessionId: externalSessionId,
+          reason: "Bridge process restart recovery",
+        });
+        if (resumed.runId !== externalRunId || resumed.state !== "running") {
+          throw recoveryDenied("DRIVER_RESUME_RESULT_INVALID");
+        }
+        await this.recordRecoverySucceeded(
+          runId,
+          ownership.lease.leaseId,
+          ownership.lease.expiresAt,
+        );
+        this.runWorktrees.set(runId, {
+          path: ownership.worktreePath,
+          task_version: taskVersion.value,
+        });
+        this.activeRuns.register(
+          {
+            run_id: runId,
+            binding: binding.value,
+            external_run_id: externalRunId,
+            external_session_id: resumed.session.externalSessionId,
+            driver,
+          },
+          this.listener === undefined
+            ? undefined
+            : async (active, driverEvent) => {
+                try {
+                  await this.handleAgentEvent(active, driverEvent);
+                } catch (error) {
+                  await this.interruptRecoveryCandidate(active.run_id, recoveryFailureCode(error));
+                  throw error;
+                }
+              },
+        );
+      } catch (error) {
+        await driver.close().catch(() => undefined);
+        throw error;
+      }
+    } catch (error) {
+      this.worktrees.release(ownership.worktreePath, runId);
+      throw error;
+    }
+  }
+
+  private async interruptRecoveryCandidate(
+    runId: string,
+    failureCode: string,
+    failureStage?: string,
+  ): Promise<void> {
+    const run = await this.repository.getAgentRun(runId);
+    if (
+      run === undefined ||
+      !["created", "running", "waiting_permission", "cancelling"].includes(run.value.status)
+    ) {
+      return;
+    }
+    const [task, bindings] = await Promise.all([
+      this.repository.getTask(run.value.task_id),
+      this.repository.listAgentSessionBindings(runId),
+    ]);
+    const activeBinding = bindings.find((item) => item.value.status === "ACTIVE");
+    const now = new Date().toISOString();
+    const terminalStatus =
+      run.value.status === "created"
+        ? transitionAgentRunStatus(run.value.status, "FAIL")
+        : transitionAgentRunStatus(run.value.status, "INTERRUPT");
+    const records: import("@agent-bridge/core").DomainRecordWrite[] = [
+      {
+        kind: "agent_run",
+        expected_revision: run.revision,
+        value: {
+          ...run.value,
+          status: terminalStatus,
+          updated_at: now,
+          started_at: run.value.started_at ?? run.value.created_at,
+          finished_at: now,
+          metadata: {
+            ...run.value.metadata,
+            recovery_status: "unsafe_to_resume",
+            recovery_failure_code: failureCode,
+            ...(failureStage === undefined ? {} : { recovery_failure_stage: failureStage }),
+            partial_worktree_retained: true,
+          },
+        },
+      },
+    ];
+    if (activeBinding !== undefined) {
+      records.push({
+        kind: "agent_session_binding",
+        expected_revision: activeBinding.revision,
+        value: transitionAgentSessionBinding(activeBinding.value, "FAIL", now),
+      });
+    }
+    if (task !== undefined && ["RUNNING", "WAITING_APPROVAL"].includes(task.value.status)) {
+      records.push({
+        kind: "task",
+        expected_revision: task.revision,
+        value: transitionTask(task.value, "INTERRUPT", now),
+      });
+    }
+    const requestId = stableId("request", `recovery-failed:${runId}`);
+    await this.repository.commit({
+      change_id: requestId,
+      idempotency: {
+        operation: "bridge_interrupt_unrecoverable_run",
+        key: `recovery-failed:${runId}`,
+        request_hash: computeContentHash({ run_id: runId, failure_code: failureCode }),
+      },
+      records,
+      events: records.map((record, index) => ({
+        event_id: stableId("event", `recovery-failed:${runId}:${index}`),
+        event_version: 1,
+        event_type:
+          record.kind === "task"
+            ? "task.status_changed"
+            : record.kind === "agent_session_binding"
+              ? "agent_session_binding.status_changed"
+              : "agent_run.status_changed",
+        aggregate: {
+          kind: record.kind,
+          id:
+            record.kind === "task"
+              ? record.value.task_id
+              : record.kind === "agent_session_binding"
+                ? record.value.binding_id
+                : (record.value as import("@agent-bridge/core").AgentRunRecord).run_id,
+          revision: record.expected_revision + 1,
+        },
+        occurred_at: now,
+        audit: {
+          actor: { kind: "system", id: "bridge-recovery" },
+          operation: "bridge_interrupt_unrecoverable_run",
+          request_id: requestId,
+          correlation_id: runId,
+          idempotency_key: `recovery-failed:${runId}`,
+          task_id: run.value.task_id,
+          task_version: run.value.task_version,
+          run_id: runId,
+        },
+        payload: {
+          recovery_status: "unsafe_to_resume",
+          failure_code: failureCode,
+          ...(failureStage === undefined ? {} : { failure_stage: failureStage }),
+        },
+      })),
+    });
+  }
+
+  private async checkpointAgentEvent(
+    runId: string,
+    externalRunId: string,
+    driverEvent: AgentEvent,
+  ): Promise<void> {
+    const active = this.activeRuns.get(runId);
+    if (active?.driver.exportRecoveryState === undefined) return;
+    const run = await this.repository.getAgentRun(runId);
+    if (
+      run === undefined ||
+      !["running", "waiting_permission", "cancelling"].includes(run.value.status)
+    ) {
+      return;
+    }
+    const priorCheckpoint = metadataRecord(run.value.metadata, "recovery_checkpoint");
+    if (metadataString(priorCheckpoint, "driver_event_id") === driverEvent.eventId) return;
+    if (await this.hasPersistedCheckpointEvent(runId, driverEvent.eventId)) return;
+
+    let recovery: import("@agent-bridge/schemas").DomainJsonValue;
+    try {
+      recovery = redactSensitiveContent(
+        asJsonObject(await active.driver.exportRecoveryState(externalRunId)),
+      );
+    } catch {
+      // A terminal Driver may close recovery export before its buffered terminal event is consumed.
+      // Keep the last durable checkpoint and continue consuming the authoritative event stream.
+      return;
+    }
+    const safeEvent = redactSensitiveContent(asJsonObject(driverEvent));
+
+    const artifactId = stableId("recovery", `${runId}:${driverEvent.eventId}`);
+    const existingArtifact = await this.artifacts.getMetadata(artifactId);
+    const artifact =
+      existingArtifact ??
+      (
+        await this.artifacts.put({
+          artifact_id: artifactId,
+          kind: "driver.recovery-checkpoint",
+          content: new TextEncoder().encode(JSON.stringify(recovery)),
+          media_type: "application/json",
+          retention_class: "audit",
+          created_at: driverEvent.occurredAt,
+          metadata: {
+            run_id: runId,
+            driver_event_id: driverEvent.eventId,
+            agent_run_revision: run.revision + 1,
+          },
+        })
+      ).artifact;
+    const updated = {
+      ...run.value,
+      updated_at: driverEvent.occurredAt,
+      metadata: {
+        ...run.value.metadata,
+        recovery_checkpoint: {
+          artifact_id: artifact.artifact_id,
+          content_hash: artifact.content_hash,
+          driver_event_id: driverEvent.eventId,
+          external_run_id: externalRunId,
+          created_at: artifact.created_at,
+        },
+      },
+    };
+    const requestId = stableId("request", `checkpoint:${runId}:${driverEvent.eventId}`);
+    await this.repository.commit({
+      change_id: requestId,
+      idempotency: {
+        operation: "bridge_checkpoint_agent_event",
+        key: `checkpoint:${runId}:${driverEvent.eventId}`,
+        request_hash: computeContentHash({
+          run_id: runId,
+          driver_event_id: driverEvent.eventId,
+          content_hash: artifact.content_hash,
+        }),
+      },
+      records: [{ kind: "agent_run", expected_revision: run.revision, value: updated }],
+      events: [
+        {
+          event_id: stableId("event", `checkpoint:${runId}:${driverEvent.eventId}`),
+          event_version: 1,
+          event_type: "agent_run.updated",
+          aggregate: { kind: "agent_run", id: runId, revision: run.revision + 1 },
+          occurred_at: driverEvent.occurredAt,
+          audit: {
+            actor: { kind: "driver", id: run.value.driver_id },
+            operation: "bridge_checkpoint_agent_event",
+            request_id: requestId,
+            correlation_id: runId,
+            causation_id: driverEvent.eventId,
+            idempotency_key: `checkpoint:${runId}:${driverEvent.eventId}`,
+            task_id: run.value.task_id,
+            task_version: run.value.task_version,
+            run_id: runId,
+          },
+          payload: { driver_event: safeEvent, checkpoint_artifact_id: artifactId },
+        },
+      ],
+    });
+  }
+
+  private async hasPersistedCheckpointEvent(
+    runId: string,
+    driverEventId: string,
+  ): Promise<boolean> {
+    let afterCursor: string | undefined;
+    while (true) {
+      const page = await this.repository.listDomainEvents({
+        run_id: runId,
+        ...(afterCursor === undefined ? {} : { after_cursor: afterCursor }),
+        limit: 200,
+      });
+      if (
+        page.events.some(
+          (event) =>
+            event.audit.operation === "bridge_checkpoint_agent_event" &&
+            event.audit.causation_id === driverEventId,
+        )
+      ) {
+        return true;
+      }
+      if (page.events.length < 200) return false;
+      afterCursor = page.next_cursor;
+    }
+  }
+
+  private async recordRecoverySucceeded(
+    runId: string,
+    leaseId: string,
+    leaseExpiresAt: string,
+  ): Promise<void> {
+    const run = await this.repository.getAgentRun(runId);
+    if (run === undefined) throw controlError("RECOVERY_NOT_ALLOWED");
+    const now = new Date().toISOString();
+    const attempt = metadataPositiveInteger(run.value.metadata, "recovery_attempt") + 1;
+    const idempotencyKey = `recovery-succeeded:${runId}:${attempt}`;
+    const requestId = stableId("request", idempotencyKey);
+    await this.repository.commit({
+      change_id: requestId,
+      idempotency: {
+        operation: "bridge_resume_persisted_run",
+        key: idempotencyKey,
+        request_hash: computeContentHash({ run_id: runId, lease_id: leaseId, attempt }),
+      },
+      records: [
+        {
+          kind: "agent_run",
+          expected_revision: run.revision,
+          value: {
+            ...run.value,
+            updated_at: now,
+            metadata: {
+              ...run.value.metadata,
+              recovery_status: "resumed",
+              recovery_attempt: attempt,
+              recovery_resumed_at: now,
+              lease_id: leaseId,
+              lease_expires_at: leaseExpiresAt,
+            },
+          },
+        },
+      ],
+      events: [
+        {
+          event_id: stableId("event", idempotencyKey),
+          event_version: 1,
+          event_type: "agent_run.updated",
+          aggregate: { kind: "agent_run", id: runId, revision: run.revision + 1 },
+          occurred_at: now,
+          audit: {
+            actor: { kind: "system", id: "bridge-recovery" },
+            operation: "bridge_resume_persisted_run",
+            request_id: requestId,
+            correlation_id: runId,
+            idempotency_key: idempotencyKey,
+            task_id: run.value.task_id,
+            task_version: run.value.task_version,
+            run_id: runId,
+          },
+          payload: { recovery_status: "resumed", recovery_attempt: attempt, lease_id: leaseId },
+        },
+      ],
+    });
+  }
+
+  private async handleAgentEvent(
+    active: import("@agent-bridge/worker-runtime").ActiveRunHandle,
+    driverEvent: AgentEvent,
+  ): Promise<void> {
+    if (["run.completed", "run.failed", "run.cancelled"].includes(driverEvent.type)) {
+      try {
+        await this.listener?.(active.run_id, driverEvent);
+      } finally {
+        void this.cleanupTerminalResources(active.run_id, driverEvent.type).catch(() => undefined);
+      }
+      return;
+    }
+    await this.checkpointAgentEvent(active.run_id, active.external_run_id, driverEvent);
+    await this.listener?.(active.run_id, driverEvent);
+  }
+
+  private async cleanupTerminalResources(runId: string, reason: string): Promise<void> {
+    const managed = this.runWorktrees.get(runId);
+    await this.activeRuns.close(runId);
+    let leaseReleased = false;
+    if (managed !== undefined) {
+      this.worktrees.release(managed.path, runId);
+      leaseReleased = true;
+    }
+    const run = await this.repository.getAgentRun(runId);
+    if (run === undefined) {
+      this.runWorktrees.delete(runId);
+      return;
+    }
+    const priorCleanup = metadataRecord(run.value.metadata, "resource_cleanup");
+    if (priorCleanup?.driver_closed === true) {
+      this.runWorktrees.delete(runId);
+      return;
+    }
+    const now = new Date().toISOString();
+    const requestId = stableId("request", `cleanup:${runId}:${reason}`);
+    await this.repository.commit({
+      change_id: requestId,
+      idempotency: {
+        operation: "bridge_cleanup_terminal_resources",
+        key: `cleanup:${runId}:${reason}`,
+        request_hash: computeContentHash({ run_id: runId, reason, lease_released: leaseReleased }),
+      },
+      records: [
+        {
+          kind: "agent_run",
+          expected_revision: run.revision,
+          value: {
+            ...run.value,
+            updated_at: now,
+            metadata: {
+              ...run.value.metadata,
+              resource_cleanup: {
+                driver_closed: true,
+                lease_released: leaseReleased,
+                worktree_retained: managed !== undefined,
+                isolation_retained: true,
+                reason,
+                audited_at: now,
+              },
+            },
+          },
+        },
+      ],
+      events: [
+        {
+          event_id: stableId("event", `cleanup:${runId}:${reason}`),
+          event_version: 1,
+          event_type: "agent_run.updated",
+          aggregate: { kind: "agent_run", id: runId, revision: run.revision + 1 },
+          occurred_at: now,
+          audit: {
+            actor: { kind: "system", id: "bridge-cleanup" },
+            operation: "bridge_cleanup_terminal_resources",
+            request_id: requestId,
+            correlation_id: runId,
+            idempotency_key: `cleanup:${runId}:${reason}`,
+            task_id: run.value.task_id,
+            task_version: run.value.task_version,
+            run_id: runId,
+          },
+          payload: {
+            driver_closed: true,
+            lease_released: leaseReleased,
+            worktree_retained: managed !== undefined,
+          },
+        },
+      ],
+    });
+    this.runWorktrees.delete(runId);
   }
 }
 
@@ -613,4 +1194,82 @@ function event(
 
 function stableId(prefix: string, key: string): string {
   return `${prefix}-${createHash("sha256").update(key).digest("hex").slice(0, 24)}`;
+}
+
+function metadataRecord(
+  metadata: import("@agent-bridge/schemas").DomainMetadata | undefined,
+  key: string,
+): import("@agent-bridge/driver-protocol").JsonObject | undefined {
+  const value = metadata?.[key];
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? asJsonObject(value)
+    : undefined;
+}
+
+function metadataString(
+  metadata:
+    | import("@agent-bridge/schemas").DomainMetadata
+    | import("@agent-bridge/driver-protocol").JsonObject
+    | undefined,
+  key: string,
+): string | undefined {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function metadataPositiveInteger(
+  metadata: import("@agent-bridge/schemas").DomainMetadata | undefined,
+  key: string,
+): number {
+  const value = metadata?.[key];
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
+
+async function readJsonArtifact(
+  artifacts: ArtifactRepository,
+  artifactId: string,
+): Promise<import("@agent-bridge/driver-protocol").JsonObject> {
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of await artifacts.read(artifactId)) chunks.push(chunk);
+  const size = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+  const merged = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return asJsonObject(JSON.parse(new TextDecoder().decode(merged)));
+}
+
+function recoveryFailureCode(error: unknown): string {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    /^[A-Z][A-Z0-9_]{1,63}$/u.test(error.code)
+  ) {
+    return error.code;
+  }
+  return "RECOVERY_DEPENDENCY_UNAVAILABLE";
+}
+
+function recoveryFailureStage(error: unknown): string | undefined {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "details" in error &&
+    typeof error.details === "object" &&
+    error.details !== null &&
+    "recovery_stage" in error.details &&
+    typeof error.details.recovery_stage === "string" &&
+    /^[A-Z][A-Z0-9_]{1,63}$/u.test(error.details.recovery_stage)
+  ) {
+    return error.details.recovery_stage;
+  }
+  return undefined;
+}
+
+function recoveryDenied(stage: string): ReturnType<typeof controlError> {
+  return controlError("RECOVERY_NOT_ALLOWED", { recovery_stage: stage });
 }

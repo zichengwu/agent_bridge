@@ -53,6 +53,12 @@ export class GitWorktreeManager {
     private readonly leases: LeaseManager,
   ) {}
 
+  async ensure(request: CreateWorktreeRequest): Promise<WorktreeOwnership> {
+    readCreateRequest(request);
+    const expectedPath = resolve(request.worktreesRoot, request.worktreeName);
+    return (await pathExists(expectedPath)) ? this.adopt(request) : this.create(request);
+  }
+
   async create(request: CreateWorktreeRequest): Promise<WorktreeOwnership> {
     readCreateRequest(request);
     const repositoryPath = await canonicalDirectory(
@@ -147,6 +153,81 @@ export class GitWorktreeManager {
     });
     this.ownershipByPath.set(worktreePath, ownership);
     this.ownershipByBranch.set(request.branch, worktreePath);
+    return ownership;
+  }
+
+  async adopt(request: CreateWorktreeRequest): Promise<WorktreeOwnership> {
+    readCreateRequest(request);
+    const repositoryPath = await canonicalDirectory(
+      request.repositoryPath,
+      "GIT_REPOSITORY_INVALID",
+    );
+    const root = await canonicalDirectory(request.worktreesRoot, "GIT_WORKTREE_CONFLICT");
+    const worktreePath = await canonicalDirectory(
+      resolve(root, request.worktreeName),
+      "GIT_WORKTREE_CONFLICT",
+    );
+    assertContained(root, worktreePath);
+    const existing = this.ownershipByPath.get(worktreePath);
+    if (existing !== undefined) {
+      if (
+        existing.runId === request.runId &&
+        existing.taskId === request.taskId &&
+        existing.taskVersion === request.taskVersion
+      ) {
+        return structuredClone(existing);
+      }
+      throw new WorkerRuntimeError("GIT_WORKTREE_CONFLICT", "Git worktree ownership conflicts");
+    }
+    const topLevel = decodeText(
+      (await this.git.run(worktreePath, ["rev-parse", "--show-toplevel"])).stdout,
+    );
+    if ((await realpath(topLevel)) !== worktreePath) {
+      throw new WorkerRuntimeError("GIT_WORKTREE_CONFLICT", "Git worktree root does not match");
+    }
+    const branch = decodeText(
+      (await this.git.run(worktreePath, ["symbolic-ref", "--short", "HEAD"])).stdout,
+    );
+    if (branch !== request.branch) {
+      throw new WorkerRuntimeError("GIT_BRANCH_CONFLICT", "Git worktree branch does not match");
+    }
+    const base = decodeText(
+      (
+        await this.git.run(repositoryPath, [
+          "rev-parse",
+          "--verify",
+          "--end-of-options",
+          `${request.baseCommit}^{commit}`,
+        ])
+      ).stdout,
+    );
+    const ancestor = await this.git.run(
+      worktreePath,
+      ["merge-base", "--is-ancestor", base, "HEAD"],
+      [0, 1],
+    );
+    if (ancestor.exitCode !== 0) {
+      throw new WorkerRuntimeError("GIT_BASE_MISMATCH", "Git base is not an ancestor of HEAD");
+    }
+    const acquiredLease = this.leases.acquire({
+      leaseId: `lease:${request.runId}`,
+      ownerId: request.runId,
+      resources: [`task:${request.taskId}:v${request.taskVersion}`, `worktree:${worktreePath}`],
+      ttlMs: request.leaseTtlMs,
+    });
+    const lease = this.leases.renew(acquiredLease.leaseId, request.runId, request.leaseTtlMs);
+    const ownership = Object.freeze({
+      repositoryPath,
+      worktreePath,
+      branch,
+      baseCommit: base,
+      taskId: request.taskId,
+      taskVersion: request.taskVersion,
+      runId: request.runId,
+      lease,
+    });
+    this.ownershipByPath.set(worktreePath, ownership);
+    this.ownershipByBranch.set(branch, worktreePath);
     return ownership;
   }
 

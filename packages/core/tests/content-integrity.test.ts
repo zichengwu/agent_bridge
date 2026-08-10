@@ -6,10 +6,23 @@ import {
   computeDocumentContentHash,
   hasValidDocumentContentHash,
   isDomainJsonValue,
+  redactSensitiveContent,
   scanSensitiveContent,
 } from "../src/index.js";
 
 describe("纯 JSON 内容完整性", () => {
+  it("递归移除敏感字段并遮蔽字符串中的凭据", () => {
+    const redacted = redactSensitiveContent({
+      api_key: "sk-sensitive-value-123456",
+      nested: { transcript: ["private"], value: "Bearer abcdefghijklmnop" },
+    });
+
+    expect(redacted).toEqual({
+      nested: { value: "[REDACTED]", redacted_fields: ["transcript"] },
+      redacted_fields: ["api_key"],
+    });
+    expect(scanSensitiveContent(redacted)).toEqual([]);
+  });
   it("对象键顺序不影响规范 JSON 与 SHA-256", () => {
     const left = { z: 1, nested: { b: true, a: [2, null] } };
     const right = { nested: { a: [2, null], b: true }, z: 1 };

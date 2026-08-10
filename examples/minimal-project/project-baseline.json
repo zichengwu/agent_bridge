@@ -1,0 +1,8 @@
+{
+  "baseline_version": 1,
+  "content": {
+    "language": "JavaScript ESM",
+    "verification": "npm run verify",
+    "constraints": ["不得读取凭据", "不得调用真实 Provider", "不得修改 .git"]
+  }
+}

@@ -26,10 +26,10 @@ Agent Bridge 是运行在开发者本机的单用户、单机协作控制层，�
 - **严格运行时配置**：无凭据配置只接受 OpenCode 主 Driver、Claude 降级 Driver 和独立验证命令目录；拒绝未知字段、历史 Cline 字段及凭据类字段。
 - **MCP stdio 控制接口**：提供任务/版本、关系、Context、启动、查询、反馈、审批、滚动、取消和完成工具；所有调用写入 SQLite 审计记录。
 - **有限审批与返工闭环**：Driver 权限请求绑定当前 Run/Session，结构化 finding 绑定当前 commit，同一任务版本最多返工三轮；Bridge 重启后保留审批、返工和观察事实，但不会盲目重放 Driver 副作用。
+- **可靠恢复与交付审计**：Driver 事件生成脱敏 Artifact checkpoint；重启时复核 Session、worktree、租约、Git 和权限范围后恢复同一 Run，否则持久化中断原因并保留部分文件。Outbox 随应用生命周期重放，终态资源释放写入审计。
 
 ## 尚未完成的产品边界
 
-- Bridge 重启后的正式 Driver 端到端恢复尚未完成；当前只提供进程监督、Driver checkpoint 和恢复决策。
 - Artifact 自动保留期清理、磁盘配额和内容 tombstone 尚未实现；当前只清理失败/过期临时文件并提供孤儿候选预览。
 - 管理 CLI、HTTP API 和图形界面尚未实现；MCP 当前只支持本地 stdio。
 - MVP 只面向本地单用户、单机环境，不支持跨机器 Worker、多租户或云端控制面。
@@ -93,6 +93,8 @@ B-simulated 使用临时隔离环境、一次性 Git worktree、合成 Token 和
 
 - [产品需求与验收基线](docs/prd/agent-bridge-prd.md)
 - [MVP Agent Driver 选型 ADR](docs/adr/0001-agent-driver-selection.md)
+- [中文使用指南](docs/guide/agent-bridge-usage.zh-CN.md)
+- [最小示例项目](examples/minimal-project/README.md)
 - [Cline SDK/Hub 历史 Spike](docs/spikes/cline-sdk-hub.md)
 
 产品行为以 PRD 和版本化领域合同为准；架构决策以 ADR 为准；Spike 文档只保留历史技术证据，不代表当前主执行路径。

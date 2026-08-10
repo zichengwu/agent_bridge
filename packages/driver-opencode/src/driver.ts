@@ -238,7 +238,9 @@ export class OpenCodeDriver implements AgentDriver {
       contextUsageBySession: [...record.contextUsageBySession.entries()].map(
         ([sessionId, usage]) => [sessionId, structuredClone(usage)] as const,
       ),
-      tokenUsage: record.tokenUsage === undefined ? undefined : structuredClone(record.tokenUsage),
+      ...(record.tokenUsage === undefined
+        ? {}
+        : { tokenUsage: structuredClone(record.tokenUsage) }),
       mapper: record.mapper.snapshotRecoveryState(),
     };
   }
@@ -727,7 +729,9 @@ function sessionHandle(input: {
     runId: input.runId,
     state: "active",
     createdAt: input.createdAt,
-    predecessorSessionId: input.predecessorSessionId,
+    ...(input.predecessorSessionId === undefined
+      ? {}
+      : { predecessorSessionId: input.predecessorSessionId }),
   };
 }
 

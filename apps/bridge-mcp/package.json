@@ -12,6 +12,7 @@
     "@agent-bridge/artifacts-local": "workspace:*",
     "@agent-bridge/core": "workspace:*",
     "@agent-bridge/driver-protocol": "workspace:*",
+    "@agent-bridge/observability": "workspace:*",
     "@agent-bridge/schemas": "workspace:*",
     "@agent-bridge/storage-sqlite": "workspace:*",
     "@agent-bridge/worker-runtime": "workspace:*",

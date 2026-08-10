@@ -3,8 +3,10 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   computeContentHash,
   decideApprovalRequest,
+  getDomainRecordId,
   readReviewCycle,
   transitionAgentRunStatus,
+  transitionAgentSessionBinding,
   transitionTask,
   type AuditActor,
   type AuthoritativeDomainEvent,
@@ -61,6 +63,7 @@ export interface BridgeRuntimePort {
     idempotencyKey: string,
   ): Promise<Readonly<Record<string, unknown>>>;
   collectOutcome(runId: string): Promise<BridgeRunOutcome>;
+  cleanupResources?(runId: string, reason: string): Promise<void>;
 }
 
 export interface BridgeRunOutcome {
@@ -268,7 +271,7 @@ export class BridgeControlService {
       task: { task_id: taskId, task_version: taskVersion },
       run_id: runId,
       target_session_id: sessionId,
-      scenario: "NEW_TASK_VERSION",
+      scenario: taskVersion === 1 ? "NEW_TASK" : "NEW_TASK_VERSION",
       context_package_id: contextPackageId,
       project_baseline: {
         component_id: `baseline:${baseline.project_id}:v${baseline.baseline_version}`,
@@ -627,15 +630,27 @@ export class BridgeControlService {
     await this.options.active_runs.cancel(run.value.run_id, stringArg(args, "reason"));
     const latestRun = await this.options.repository.getAgentRun(run.value.run_id);
     if (latestRun === undefined) throw controlError("RUN_NOT_FOUND");
+    if (latestRun.value.status === "cancelled") return cancelled;
+    const bindings = await this.options.repository.listAgentSessionBindings(run.value.run_id);
+    const activeBinding = bindings.find((item) => item.value.status === "ACTIVE");
+    const confirmedAt = this.now().toISOString();
     const confirmed = {
       ...latestRun.value,
       status: transitionAgentRunStatus(latestRun.value.status, "CONFIRM_CANCELLED"),
-      updated_at: this.now().toISOString(),
-      finished_at: this.now().toISOString(),
+      updated_at: confirmedAt,
+      finished_at: confirmedAt,
     };
-    await this.commitRecords("bridge_cancel_task_confirm", `${key}:confirm`, [
+    const confirmationRecords: DomainRecordWrite[] = [
       { kind: "agent_run", expected_revision: latestRun.revision, value: confirmed },
-    ]);
+    ];
+    if (activeBinding !== undefined) {
+      confirmationRecords.push({
+        kind: "agent_session_binding",
+        expected_revision: activeBinding.revision,
+        value: transitionAgentSessionBinding(activeBinding.value, "CLOSE", confirmedAt),
+      });
+    }
+    await this.commitRecords("bridge_cancel_task_confirm", `${key}:confirm`, confirmationRecords);
     return cancelled;
   }
 
@@ -643,6 +658,8 @@ export class BridgeControlService {
     let task = await this.requireTask(stringArg(args, "task_id"));
     const mergeCommit = stringArg(args, "merge_commit");
     if (task.value.status === "COMPLETED" && task.value.metadata?.merge_commit === mergeCommit) {
+      const completedRun = await this.latestRun(task.value.task_id);
+      await this.options.runtime.cleanupResources?.(completedRun.value.run_id, "task.completed");
       return task.value;
     }
     const key = stringArg(args, "idempotency_key");
@@ -692,6 +709,7 @@ export class BridgeControlService {
       });
     }
     await this.commitRecords("bridge_mark_completed", key, records);
+    await this.options.runtime.cleanupResources?.(run.value.run_id, "task.completed");
     return completed;
   }
 
@@ -725,15 +743,19 @@ export class BridgeControlService {
     ]);
   }
 
-  async onAgentEvent(event: AgentEvent): Promise<void> {
+  async onAgentEvent(event: AgentEvent, bridgeRunId: string = event.runId): Promise<void> {
     if (event.type === "run.completed") {
-      await this.recordCompletedRun(event.runId);
+      await this.recordCompletedRun(bridgeRunId);
+      return;
+    }
+    if (event.type === "run.failed" || event.type === "run.cancelled") {
+      await this.recordTerminalDriverFailure(bridgeRunId, event);
       return;
     }
     if (event.type !== "permission.requested") return;
-    const run = await this.options.repository.getAgentRun(event.runId);
+    const run = await this.options.repository.getAgentRun(bridgeRunId);
     if (run === undefined) return;
-    const bindings = await this.options.repository.listAgentSessionBindings(event.runId);
+    const bindings = await this.options.repository.listAgentSessionBindings(bridgeRunId);
     const binding = bindings.find((item) => item.value.status === "ACTIVE");
     const task = await this.requireTask(run.value.task_id);
     if (binding === undefined || task.value.status !== "RUNNING") return;
@@ -767,6 +789,64 @@ export class BridgeControlService {
     ]);
   }
 
+  private async recordTerminalDriverFailure(
+    runId: string,
+    event: Extract<AgentEvent, { readonly type: "run.failed" | "run.cancelled" }>,
+  ): Promise<void> {
+    const run = await this.options.repository.getAgentRun(runId);
+    if (
+      run === undefined ||
+      !["running", "waiting_permission", "cancelling"].includes(run.value.status)
+    ) {
+      return;
+    }
+    const task = await this.requireTask(run.value.task_id);
+    const bindings = await this.options.repository.listAgentSessionBindings(runId);
+    const activeBinding = bindings.find((item) => item.value.status === "ACTIVE");
+    const now = event.occurredAt;
+    const runTransition =
+      event.type === "run.cancelled" && run.value.status === "cancelling"
+        ? "CONFIRM_CANCELLED"
+        : "FAIL";
+    const terminalRun = {
+      ...run.value,
+      status: transitionAgentRunStatus(run.value.status, runTransition),
+      updated_at: now,
+      finished_at: now,
+      metadata: {
+        ...run.value.metadata,
+        terminal_driver_event: event.type,
+        failure_code: event.type === "run.failed" ? event.error.code : "DRIVER_CANCELLED",
+      },
+    };
+    const records: DomainRecordWrite[] = [
+      { kind: "agent_run", expected_revision: run.revision, value: terminalRun },
+    ];
+    if (activeBinding !== undefined) {
+      records.push({
+        kind: "agent_session_binding",
+        expected_revision: activeBinding.revision,
+        value: transitionAgentSessionBinding(
+          activeBinding.value,
+          event.type === "run.cancelled" ? "CLOSE" : "FAIL",
+          now,
+        ),
+      });
+    }
+    if (task.value.status === "RUNNING" || task.value.status === "WAITING_APPROVAL") {
+      records.unshift({
+        kind: "task",
+        expected_revision: task.revision,
+        value: transitionTask(task.value, "INTERRUPT", now),
+      });
+    }
+    await this.commitRecords(
+      "driver_run_terminal_failure",
+      `${runId}:${event.eventId}:terminal`,
+      records,
+    );
+  }
+
   private async recordCompletedRun(runId: string): Promise<void> {
     const run = await this.options.repository.getAgentRun(runId);
     if (run === undefined) throw controlError("RUN_NOT_FOUND");
@@ -779,6 +859,7 @@ export class BridgeControlService {
     if (version === undefined) throw controlError("TASK_VERSION_NOT_FOUND");
     const outcome = await this.options.runtime.collectOutcome(runId);
     const bindings = await this.options.repository.listAgentSessionBindings(runId);
+    const activeBinding = bindings.find((item) => item.value.status === "ACTIVE");
     const existingResult = await this.options.repository.getTaskResult(runId);
     const cycles = await this.options.repository.listReviewCycles({
       task_id: run.value.task_id,
@@ -817,10 +898,31 @@ export class BridgeControlService {
       metadata: { agent_summary: outcome.result.summary },
     };
     const submitted = transitionTask(task.value, "SUBMIT", outcome.result.completedAt);
+    const succeededRun = {
+      ...run.value,
+      status: transitionAgentRunStatus(run.value.status, "SUCCEED"),
+      updated_at: outcome.result.completedAt,
+      finished_at: outcome.result.completedAt,
+    };
+    const terminalRecords: DomainRecordWrite[] = [
+      { kind: "task", expected_revision: task.revision, value: submitted },
+      { kind: "agent_run", expected_revision: run.revision, value: succeededRun },
+    ];
+    if (activeBinding !== undefined) {
+      terminalRecords.push({
+        kind: "agent_session_binding",
+        expected_revision: activeBinding.revision,
+        value: transitionAgentSessionBinding(
+          activeBinding.value,
+          "CLOSE",
+          outcome.result.completedAt,
+        ),
+      });
+    }
     let activeReviewId: string | undefined;
     if (existingResult === undefined) {
       await this.commitRecords("driver_run_submitted", `${runId}:submitted`, [
-        { kind: "task", expected_revision: task.revision, value: submitted },
+        ...terminalRecords,
         { kind: "task_result", expected_revision: 0, value: taskResult },
       ]);
     } else {
@@ -840,7 +942,7 @@ export class BridgeControlService {
         "driver_run_resubmitted",
         `${runId}:resubmitted:${resubmitted.cycle_number}`,
         [
-          { kind: "task", expected_revision: task.revision, value: submitted },
+          ...terminalRecords,
           {
             kind: "review_cycle",
             expected_revision: activeCycle.revision,
@@ -1007,7 +1109,7 @@ function eventForRecord(
   eventId: string,
   index: number,
 ): AuthoritativeDomainEvent {
-  const id = recordId(record);
+  const id = getDomainRecordId(record.kind, record.value);
   const eventType =
     record.expected_revision === 0
       ? (
@@ -1066,33 +1168,6 @@ function taskScope(value: object): { task_id?: string; task_version?: number; ru
       : {}),
     ...("run_id" in value && typeof value.run_id === "string" ? { run_id: value.run_id } : {}),
   };
-}
-
-function recordId(record: DomainRecordWrite): string {
-  const value = record.value as unknown as Record<string, unknown>;
-  if (record.kind === "task_version")
-    return `${String(value.task_id)}:v${String(value.task_version)}`;
-  if (record.kind === "project_baseline")
-    return `${String(value.project_id)}:v${String(value.baseline_version)}`;
-  if (record.kind === "handoff_package")
-    return `${String(value.handoff_id)}:v${String(value.handoff_version)}`;
-  if (record.kind === "continuation_snapshot")
-    return `${String(value.snapshot_id)}:v${String(value.snapshot_version)}`;
-  const fields = [
-    "task_id",
-    "run_id",
-    "relation_id",
-    "binding_id",
-    "context_package_id",
-    "approval_id",
-    "review_id",
-    "invocation_id",
-  ];
-  for (const field of fields) {
-    const candidate = value[field];
-    if (typeof candidate === "string") return candidate;
-  }
-  throw controlError("RECORD_ID_INVALID");
 }
 
 function required(value: JsonObject, field: string): unknown {

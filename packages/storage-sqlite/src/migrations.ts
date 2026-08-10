@@ -2,12 +2,30 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { SqliteStorageError } from "./errors.js";
 
-export const SQLITE_SCHEMA_VERSION = 2 as const;
+export const SQLITE_SCHEMA_VERSION = 3 as const;
 
 const MIGRATION_NAME = "phase_2f_initial";
 const MIGRATION_CHECKSUM = "phase-2f-v1-2026-07-31";
 const PHASE_3_MIGRATION_NAME = "phase_3_control_records";
 const PHASE_3_MIGRATION_CHECKSUM = "phase-3-v2-2026-07-31";
+const PHASE_4_MIGRATION_NAME = "phase_4_runtime_leases";
+const PHASE_4_MIGRATION_CHECKSUM = "phase-4-v3-2026-08-07";
+
+const PHASE_4_SQL = `
+  CREATE TABLE runtime_leases (
+    lease_id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    acquired_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+  ) STRICT;
+
+  CREATE TABLE runtime_lease_resources (
+    resource TEXT PRIMARY KEY,
+    lease_id TEXT NOT NULL REFERENCES runtime_leases(lease_id) ON DELETE CASCADE
+  ) STRICT;
+  CREATE INDEX runtime_lease_resources_lease_idx
+    ON runtime_lease_resources(lease_id, resource);
+`;
 
 const RECORD_TABLES_SQL = [
   `CREATE TABLE tasks (
@@ -169,12 +187,21 @@ export function migrateSqliteDatabase(database: DatabaseSync): void {
   if (version === SQLITE_SCHEMA_VERSION) {
     assertMigrationChecksum(database, 1, MIGRATION_NAME, MIGRATION_CHECKSUM);
     assertMigrationChecksum(database, 2, PHASE_3_MIGRATION_NAME, PHASE_3_MIGRATION_CHECKSUM);
+    assertMigrationChecksum(database, 3, PHASE_4_MIGRATION_NAME, PHASE_4_MIGRATION_CHECKSUM);
+    return;
+  }
+
+  if (version === 2) {
+    assertMigrationChecksum(database, 1, MIGRATION_NAME, MIGRATION_CHECKSUM);
+    assertMigrationChecksum(database, 2, PHASE_3_MIGRATION_NAME, PHASE_3_MIGRATION_CHECKSUM);
+    applyPhase4Migration(database);
     return;
   }
 
   if (version === 1) {
     assertMigrationChecksum(database, 1, MIGRATION_NAME, MIGRATION_CHECKSUM);
     applyPhase3Migration(database);
+    applyPhase4Migration(database);
     return;
   }
 
@@ -271,6 +298,13 @@ export function migrateSqliteDatabase(database: DatabaseSync): void {
          VALUES (?, ?, ?, ?)`,
       )
       .run(2, PHASE_3_MIGRATION_NAME, PHASE_3_MIGRATION_CHECKSUM, new Date().toISOString());
+    database.exec(PHASE_4_SQL);
+    database
+      .prepare(
+        `INSERT INTO schema_migrations(version, name, checksum, applied_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(3, PHASE_4_MIGRATION_NAME, PHASE_4_MIGRATION_CHECKSUM, new Date().toISOString());
     database.exec(`PRAGMA user_version = ${SQLITE_SCHEMA_VERSION}`);
     database.exec("COMMIT");
   } catch (error) {
@@ -326,6 +360,24 @@ function applyPhase3Migration(database: DatabaseSync): void {
   } catch {
     rollbackQuietly(database);
     throw new SqliteStorageError("MIGRATION_FAILED", { target_version: 2 });
+  }
+}
+
+function applyPhase4Migration(database: DatabaseSync): void {
+  try {
+    database.exec("BEGIN IMMEDIATE");
+    database.exec(PHASE_4_SQL);
+    database
+      .prepare(
+        `INSERT INTO schema_migrations(version, name, checksum, applied_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(3, PHASE_4_MIGRATION_NAME, PHASE_4_MIGRATION_CHECKSUM, new Date().toISOString());
+    database.exec("PRAGMA user_version = 3");
+    database.exec("COMMIT");
+  } catch {
+    rollbackQuietly(database);
+    throw new SqliteStorageError("MIGRATION_FAILED", { target_version: 3 });
   }
 }
 

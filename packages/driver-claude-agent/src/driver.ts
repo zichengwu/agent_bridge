@@ -217,8 +217,10 @@ export class ClaudeAgentDriver implements AgentDriver {
       contextUsageBySession: [...record.contextUsageBySession.entries()].map(
         ([sessionId, usage]) => [sessionId, structuredClone(usage)] as const,
       ),
-      tokenUsage: record.tokenUsage === undefined ? undefined : structuredClone(record.tokenUsage),
-      resultSummary: record.resultSummary,
+      ...(record.tokenUsage === undefined
+        ? {}
+        : { tokenUsage: structuredClone(record.tokenUsage) }),
+      ...(record.resultSummary === undefined ? {} : { resultSummary: record.resultSummary }),
       mapper: record.mapper.snapshotRecoveryState(),
     };
   }
@@ -794,7 +796,9 @@ function sessionHandle(input: {
     runId: input.runId,
     state: "active",
     createdAt: input.createdAt,
-    predecessorSessionId: input.predecessorSessionId,
+    ...(input.predecessorSessionId === undefined
+      ? {}
+      : { predecessorSessionId: input.predecessorSessionId }),
   };
 }
 

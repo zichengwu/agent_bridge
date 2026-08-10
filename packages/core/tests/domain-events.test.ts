@@ -24,6 +24,7 @@ const eventCases = [
   ["task_relation.recorded", "task_relation"],
   ["agent_run.created", "agent_run"],
   ["agent_run.status_changed", "agent_run"],
+  ["agent_run.updated", "agent_run"],
   ["agent_session_binding.recorded", "agent_session_binding"],
   ["agent_session_binding.status_changed", "agent_session_binding"],
   ["context_package.recorded", "context_package"],
