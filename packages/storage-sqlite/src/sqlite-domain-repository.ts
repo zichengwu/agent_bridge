@@ -227,15 +227,39 @@ export class SqliteDomainRepository implements DomainRepository, ArtifactReferen
     return this.getRecord("task", readIdentifier(taskId, "TASK_ID_INVALID"));
   }
 
+  async getEventCursor(): Promise<string> {
+    await Promise.resolve();
+    this.assertOpen();
+    return encodeEventCursor(this.readMaximumEventSequence());
+  }
+
   async listTasks(value: TaskQuery = {}): Promise<readonly StoredDomainRecord<"task">[]> {
     await Promise.resolve();
-    const query = readSimpleQuery(value, ["project_id", "status", "limit"]);
+    const query = readSimpleQuery(value, [
+      "project_id",
+      "status",
+      "after_task_id",
+      "order_by",
+      "limit",
+    ]);
+    if (query.order_by !== undefined && query.order_by !== "record_id") {
+      throw invalidQuery("QUERY_INVALID");
+    }
     const conditions: string[] = [];
     const parameters: Array<string | number> = [];
     addOptionalCondition(conditions, parameters, "project_id", query.project_id);
     addOptionalCondition(conditions, parameters, "status", query.status);
+    if (query.after_task_id !== undefined) {
+      conditions.push("record_id > ?");
+      parameters.push(readIdentifier(query.after_task_id, "TASK_ID_INVALID"));
+    }
     parameters.push(readLimit(query.limit));
-    return this.queryRecords("task", conditions, parameters, "updated_at DESC, record_id");
+    return this.queryRecords(
+      "task",
+      conditions,
+      parameters,
+      query.order_by === "record_id" ? "record_id" : "updated_at DESC, record_id",
+    );
   }
 
   async getTaskVersion(

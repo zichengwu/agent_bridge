@@ -226,6 +226,41 @@ describe.each(repositoryFactories)("Repository 合约：%s", (_label, createRepo
     expect(events.events.map((event) => event.event_id)).toEqual(["event-idempotent"]);
   });
 
+  it("事件头游标与事务提交后的持久事件数量一致", async () => {
+    const repository = createRepository();
+    expect(await repository.getEventCursor()).toBe("event-cursor:0");
+
+    await repository.commit(requestFor("cursor", recordCases[0]!.write, "task.created"));
+
+    expect(await repository.getEventCursor()).toBe("event-cursor:1");
+  });
+
+  it("按 record_id 提供稳定的内部 Task 扫描分页", async () => {
+    const repository = createRepository();
+    await repository.commit(requestFor("scan-1", recordCases[0]!.write, "task.created"));
+    await repository.commit(
+      requestFor(
+        "scan-2",
+        {
+          kind: "task",
+          expected_revision: 0,
+          value: { ...task, task_id: "task-2" },
+        },
+        "task.created",
+      ),
+    );
+
+    const first = await repository.listTasks({ order_by: "record_id", limit: 1 });
+    const second = await repository.listTasks({
+      order_by: "record_id",
+      after_task_id: first[0]!.value.task_id,
+      limit: 1,
+    });
+
+    expect(first.map((item) => item.value.task_id)).toEqual(["task-1"]);
+    expect(second.map((item) => item.value.task_id)).toEqual(["task-2"]);
+  });
+
   it.each([
     ["different request hash", { request_hash: hashB }],
     ["different change id", { change_id: "change-idempotent-other" }],

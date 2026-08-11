@@ -33,6 +33,7 @@ import {
 } from "@agent-bridge/worker-runtime";
 
 import { controlError } from "./errors.js";
+import { taskResultUsageFromAgentResult } from "./usage-facts.js";
 
 const ACTOR: AuditActor = Object.freeze({ kind: "bridge", id: "bridge-mcp" });
 
@@ -866,6 +867,7 @@ export class BridgeControlService {
       task_version: run.value.task_version,
       run_id: runId,
     });
+    const usage = taskResultUsageFromAgentResult(outcome.result);
     const taskResult: TaskResult = {
       schema_version: DOMAIN_SCHEMA_VERSION,
       task_id: run.value.task_id,
@@ -892,6 +894,7 @@ export class BridgeControlService {
       artifacts: [
         { artifact_id: outcome.verification.report_artifact_id, kind: "verification.report" },
       ],
+      ...(usage === undefined ? {} : { usage }),
       output: jsonValue(outcome.result.output),
       started_at: run.value.started_at ?? run.value.created_at,
       finished_at: outcome.verification.finished_at,

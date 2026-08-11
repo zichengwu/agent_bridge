@@ -170,6 +170,53 @@ describe("SQLite Repository contract", () => {
     ).toHaveLength(1);
   });
 
+  it("returns the durable event head cursor without scanning event payloads", async () => {
+    const repository = await createRepository();
+    expect(await repository.getEventCursor()).toBe("event-cursor:0");
+
+    await repository.commit(
+      requestFor(
+        "cursor-head",
+        { kind: "task", expected_revision: 0, value: taskValue() },
+        "task.created",
+      ),
+    );
+
+    expect(await repository.getEventCursor()).toBe("event-cursor:1");
+  });
+
+  it("supports stable record_id Task scanning without changing the default query contract", async () => {
+    const repository = await createRepository();
+    await repository.commit(
+      requestFor(
+        "scan-2",
+        {
+          kind: "task",
+          expected_revision: 0,
+          value: { ...taskValue(), task_id: "task-2" },
+        },
+        "task.created",
+      ),
+    );
+    await repository.commit(
+      requestFor(
+        "scan-1",
+        { kind: "task", expected_revision: 0, value: taskValue() },
+        "task.created",
+      ),
+    );
+
+    const first = await repository.listTasks({ order_by: "record_id", limit: 1 });
+    const second = await repository.listTasks({
+      order_by: "record_id",
+      after_task_id: first[0]!.value.task_id,
+      limit: 1,
+    });
+
+    expect(first.map((item) => item.value.task_id)).toEqual(["task-1"]);
+    expect(second.map((item) => item.value.task_id)).toEqual(["task-2"]);
+  });
+
   it("rolls back every record, event, reference, and Outbox row on revision conflict", async () => {
     const repository = await createRepository();
     await repository.commit(

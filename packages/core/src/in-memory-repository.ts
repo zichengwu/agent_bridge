@@ -169,6 +169,11 @@ export class InMemoryDomainRepository implements DomainRepository {
     return this.getRecord("task", readIdentifier(taskId, "TASK_ID_INVALID"));
   }
 
+  async getEventCursor(): Promise<string> {
+    await Promise.resolve();
+    return encodeEventCursor(this.events.length);
+  }
+
   async listTasks(value: TaskQuery = {}): Promise<readonly StoredDomainRecord<"task">[]> {
     await Promise.resolve();
     const query = readTaskQuery(value);
@@ -177,7 +182,8 @@ export class InMemoryDomainRepository implements DomainRepository {
         .filter(
           (record) =>
             (query.project_id === undefined || record.value.project_id === query.project_id) &&
-            (query.status === undefined || record.value.status === query.status),
+            (query.status === undefined || record.value.status === query.status) &&
+            (query.after_task_id === undefined || record.value.task_id > query.after_task_id),
         )
         .sort((left, right) => compareText(left.record_id, right.record_id))
         .slice(0, query.limit),
@@ -562,8 +568,10 @@ function readRecoveryQuery(
 function readTaskQuery(value: unknown) {
   if (
     !isPlainRecord(value) ||
-    !hasOnlyKeys(value, ["project_id", "status", "limit"]) ||
+    !hasOnlyKeys(value, ["project_id", "status", "after_task_id", "order_by", "limit"]) ||
     (value.project_id !== undefined && !isIdentifier(value.project_id)) ||
+    (value.after_task_id !== undefined && !isIdentifier(value.after_task_id)) ||
+    (value.order_by !== undefined && value.order_by !== "record_id") ||
     (value.status !== undefined && typeof value.status !== "string")
   ) {
     throw invalidQuery("TASK_QUERY_INVALID");

@@ -312,6 +312,16 @@ const fullSamples: Readonly<Record<DomainSchemaKind, SampleFactory>> = {
     ],
     provider_id: "configured/provider",
     model_id: "configured/model[extended]",
+    usage: {
+      unit: "token",
+      input_units: 1200,
+      output_units: 300,
+      cache_read_units: 100,
+      cache_write_units: 20,
+      total_units: 1620,
+      source: "driver_exact",
+      measured_at: laterTimestamp,
+    },
     output: {
       summary: "完成",
       counters: [1, 2, 3],
@@ -558,6 +568,42 @@ describe("必填字段、枚举和结构约束", () => {
       },
     ];
     expectInvalidAt("continuationSnapshot", snapshot, "/recent_verification/0/status");
+  });
+});
+
+describe("TaskResult usage 事实", () => {
+  it("接受合同冻结的安全单位字段并拒绝错误 total_units", () => {
+    const valid = fullSamples.taskResult();
+    expect(() => parseDomainObject("taskResult", valid)).not.toThrow();
+
+    const invalid = {
+      ...valid,
+      usage: { ...(valid.usage as JsonRecord), total_units: 1619 },
+    };
+    expectInvalidAt("taskResult", invalid, "/usage/total_units");
+  });
+
+  it("拒绝旧 token 字段和未知 usage 字段", () => {
+    const sample = minimalSamples.taskResult();
+    expectInvalidAt(
+      "taskResult",
+      {
+        ...sample,
+        usage: {
+          unit: "token",
+          input_tokens: 10,
+          output_tokens: 5,
+          input_units: 10,
+          output_units: 5,
+          cache_read_units: 0,
+          cache_write_units: 0,
+          total_units: 15,
+          source: "driver_exact",
+          measured_at: laterTimestamp,
+        },
+      },
+      "/usage/input_tokens",
+    );
   });
 });
 

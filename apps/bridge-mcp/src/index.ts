@@ -9,9 +9,11 @@ export * from "./bootstrap.js";
 export * from "./bridge-control-service.js";
 export * from "./errors.js";
 export * from "./local-runtime.js";
+export * from "./management-projection.js";
 export * from "./outbox-pump.js";
 export * from "./server.js";
 export * from "./tool-contracts.js";
+export * from "./usage-facts.js";
 
 if (isMainModule()) {
   void main().catch((error: unknown) => {

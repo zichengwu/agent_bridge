@@ -18,7 +18,7 @@ export function parseDomainObject<K extends DomainSchemaKind>(
   value: unknown,
 ): DomainSchemaTypeMap[K] {
   assertSupportedVersion(kind, value);
-  const issues = collectIssues(DOMAIN_SCHEMA_REGISTRY[kind], value);
+  const issues = collectDomainIssues(kind, value);
   if (issues.length > 0) {
     throw new DomainSchemaError("DOMAIN_SCHEMA_INVALID", "Domain schema validation failed", {
       schema_kind: kind,
@@ -56,7 +56,7 @@ export function assertDomainObject<K extends DomainSchemaKind>(
   value: unknown,
 ): asserts value is DomainSchemaTypeMap[K] {
   assertSupportedVersion(kind, value);
-  const issues = collectIssues(DOMAIN_SCHEMA_REGISTRY[kind], value);
+  const issues = collectDomainIssues(kind, value);
   if (issues.length > 0) {
     throw new DomainSchemaError("DOMAIN_SCHEMA_INVALID", "Domain schema validation failed", {
       schema_kind: kind,
@@ -211,6 +211,32 @@ function assertSupportedVersion(kind: DomainSchemaKind, value: unknown): void {
 function collectIssues(schema: JsonSchema, value: unknown): readonly DomainSchemaIssue[] {
   const issues: DomainSchemaIssue[] = [];
   validateSchema(schema, value, "", schema, issues, new WeakSet<object>());
+  return issues;
+}
+
+function collectDomainIssues(kind: DomainSchemaKind, value: unknown): readonly DomainSchemaIssue[] {
+  const issues = [...collectIssues(DOMAIN_SCHEMA_REGISTRY[kind], value)];
+  if (
+    issues.length === 0 &&
+    kind === "taskResult" &&
+    isPlainRecord(value) &&
+    isPlainRecord(value.usage)
+  ) {
+    const usage = value.usage;
+    const expectedTotal =
+      Number(usage.input_units) +
+      Number(usage.output_units) +
+      Number(usage.cache_read_units) +
+      Number(usage.cache_write_units);
+    if (usage.total_units !== expectedTotal) {
+      addIssue(
+        issues,
+        "/usage/total_units",
+        "total",
+        "must equal the sum of input, output, cache read, and cache write units",
+      );
+    }
+  }
   return issues;
 }
 
