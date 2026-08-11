@@ -127,6 +127,17 @@ export interface ArtifactReference {
   readonly content_hash?: string;
 }
 
+export interface TaskResultUsage {
+  readonly unit: "token";
+  readonly input_units: number;
+  readonly output_units: number;
+  readonly cache_read_units: number;
+  readonly cache_write_units: number;
+  readonly total_units: number;
+  readonly source: "driver_exact" | "driver_estimate" | "bridge_estimate";
+  readonly measured_at: string;
+}
+
 export interface TaskResult {
   readonly schema_version: DomainSchemaVersion;
   readonly task_id: string;
@@ -144,6 +155,7 @@ export interface TaskResult {
   readonly artifacts?: readonly ArtifactReference[];
   readonly provider_id?: string;
   readonly model_id?: string;
+  readonly usage?: TaskResultUsage;
   readonly output?: DomainJsonValue;
   readonly started_at: string;
   readonly finished_at: string;

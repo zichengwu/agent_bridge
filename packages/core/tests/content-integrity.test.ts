@@ -78,9 +78,38 @@ describe("纯 JSON 内容完整性", () => {
       scanSensitiveContent({
         used_tokens: 700,
         max_tokens: 1000,
+        usage: {
+          unit: "token",
+          input_units: 1200,
+          output_units: 300,
+          cache_read_units: 100,
+          cache_write_units: 20,
+          total_units: 1620,
+        },
         content_hash: `sha256:${"a".repeat(64)}`,
       }),
     ).toEqual([]);
+    expect(
+      redactSensitiveContent({
+        usage: {
+          unit: "token",
+          input_units: 1200,
+          output_units: 300,
+          cache_read_units: 100,
+          cache_write_units: 20,
+          total_units: 1620,
+        },
+      }),
+    ).toEqual({
+      usage: {
+        unit: "token",
+        input_units: 1200,
+        output_units: 300,
+        cache_read_units: 100,
+        cache_write_units: 20,
+        total_units: 1620,
+      },
+    });
   });
 
   it.each(["client_secret", "auth-token", "refreshToken", "databasePassword"])(

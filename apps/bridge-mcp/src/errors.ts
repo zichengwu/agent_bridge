@@ -51,6 +51,7 @@ export function classifyBridgeError(code: string): {
   if (code.includes("TIMEOUT") || code.includes("UNAVAILABLE") || code.includes("TRANSPORT")) {
     return { category: "TRANSIENT", retryable: true };
   }
+  if (code.includes("BUSY")) return { category: "TRANSIENT", retryable: true };
   if (
     code.includes("POLICY") ||
     code.includes("APPROVAL") ||

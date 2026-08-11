@@ -171,6 +171,8 @@ export interface RecoveryCandidateQuery {
 export interface TaskQuery {
   readonly project_id?: string;
   readonly status?: TaskStatus;
+  readonly after_task_id?: string;
+  readonly order_by?: "record_id";
   readonly limit?: number;
 }
 
@@ -197,6 +199,7 @@ export interface ReviewCycleQuery {
 
 export interface DomainRepository {
   commit(request: DomainWriteRequest): Promise<DomainWriteResult>;
+  getEventCursor(): Promise<string>;
   getTask(taskId: string): Promise<StoredDomainRecord<"task"> | undefined>;
   listTasks(query?: TaskQuery): Promise<readonly StoredDomainRecord<"task">[]>;
   getTaskVersion(

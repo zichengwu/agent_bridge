@@ -232,6 +232,35 @@ const artifactReferenceSchema: JsonSchema = strictObject(
   ["artifact_id", "kind"],
 );
 
+const taskResultUsageSchema: JsonSchema = strictObject(
+  {
+    unit: {
+      type: "string",
+      const: "token",
+    },
+    input_units: nonNegativeIntegerSchema,
+    output_units: nonNegativeIntegerSchema,
+    cache_read_units: nonNegativeIntegerSchema,
+    cache_write_units: nonNegativeIntegerSchema,
+    total_units: nonNegativeIntegerSchema,
+    source: {
+      type: "string",
+      enum: ["driver_exact", "driver_estimate", "bridge_estimate"],
+    },
+    measured_at: timestampSchema,
+  },
+  [
+    "unit",
+    "input_units",
+    "output_units",
+    "cache_read_units",
+    "cache_write_units",
+    "total_units",
+    "source",
+    "measured_at",
+  ],
+);
+
 const contextComponentSchema: JsonSchema = strictObject(
   {
     component_id: identifierSchema,
@@ -439,6 +468,7 @@ const taskResultSchema = topLevelSchema(
     },
     provider_id: opaqueIdentifierSchema,
     model_id: opaqueIdentifierSchema,
+    usage: taskResultUsageSchema,
     output: jsonValueReference,
     started_at: timestampSchema,
     finished_at: timestampSchema,
