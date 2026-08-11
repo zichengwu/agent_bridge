@@ -3,16 +3,16 @@
 ## 0. 文档状态
 
 - PRD 标识：`PRD-AGENT-BRIDGE-001`
-- 版本：`v1.7`
-- 状态：Phase 4.1 已完成；Phase 4.2 产品需求与交互原型已收口，待技术与安全合同评审
+- 版本：`v1.8`
+- 状态：Phase 4.1 已完成；Phase 4.2 产品、原型与技术安全合同均已收口，研发就绪但尚未授权实现
 - 文档深度：完整 PRD
 - 负责人：待指定
 - 最近更新：2026-08-11
 - 目标版本：MVP
 - 基线或关联提交：暂无
-- 替代版本：`v1.5`
+- 替代版本：`v1.7`
 - 关联原型：[`docs/prototypes/phase-4-2-dashboard/dashboard-prototype-v2.html`](../prototypes/phase-4-2-dashboard/dashboard-prototype-v2.html)，已完成核心流程验证
-- 本次主要变更：关闭 Phase 4.2 产品与原型验证；定稿运行摘要、运行与处置仪表盘、阶段式进度、审批拒绝后的重新规划语义、高风险二次确认，以及页面不创建任务的边界
+- 本次主要变更：关闭 OQ-006；接受 ADR-0003、内部 HTTP/JSON + SSE v1 合同与 Contract 测试矩阵，冻结本地管理页技术栈、localhost 安全、事件恢复、并发写入和实现门禁
 
 ### 0.1 来源状态说明
 
@@ -28,18 +28,18 @@
 - 当前做法：Codex 与各类 Code Agent 是独立工具，默认不共享会话、任务状态、权限和工作区。
 - 主要问题：缺少中立控制层，导致信息难以结构化传递，业务约束可能漂移；不同需求长期复用同一对话还会造成上下文污染，而强制切换窗口又可能丢失关联任务的必要成果。
 - 期望结果：通过独立 Agent Bridge 建立可审计、可隔离、可恢复、可验证的协作流程，并通过统一管理面降低任务管理、进度观察、审批处理和异常定位成本。
-- 已确认事实：需要独立 Agent Bridge；MVP 采用本地、单用户、单机部署；技术栈采用 Node.js 22+、TypeScript 和 pnpm monorepo；Bridge Core 只依赖版本化 Agent Driver 协议；OpenCode `1.18.3` 为 MVP 主 Driver，Claude Agent SDK `0.3.215` / Claude Code `2.1.215` 为 MVP 降级 Driver；OQ-004 全部规则已定稿；不同需求使用独立 Agent Session，相关需求通过结构化摘要传递必要信息；Phase 4.2 首版采用由项目命令或 Codex 启动并自动打开浏览器的本地 Web 管理页，不提供用户侧通用管理 CLI，也不在页面创建任务。
+- 已确认事实：需要独立 Agent Bridge；MVP 采用本地、单用户、单机部署；技术栈采用 Node.js 22+、TypeScript 和 pnpm monorepo；Bridge Core 只依赖版本化 Agent Driver 协议；OpenCode `1.18.3` 为 MVP 主 Driver，Claude Agent SDK `0.3.215` / Claude Code `2.1.215` 为 MVP 降级 Driver；OQ-004 全部规则已定稿；不同需求使用独立 Agent Session，相关需求通过结构化摘要传递必要信息；Phase 4.2 首版采用由项目命令或 Codex 启动并自动打开浏览器的本地 Web 管理页，不提供用户侧通用管理 CLI，也不在页面创建任务；OQ-006 已关闭，首版采用原生 TypeScript/HTML/CSS、Node.js 22 内置 HTTP 与 SSE，不新增外部运行时依赖。
 - 合理推断：MVP 主要面向个人开发环境，而不是团队级云平台。
 - 已验证事实：OpenCode 与 Claude Agent SDK 均已通过 A 层、B-simulated 和 B-real 的适用 Session、事件、取消、权限、恢复、隔离、结果、用量和清理硬门禁；精确上下文用量等增强能力仍允许由 Bridge 估算或持久化机制补偿，但稳定 Session、确定取消和安全隔离不得静默降级。
 - 待验证假设：后续 Provider 级灾备可以在不改变 Driver Protocol 和领域核心的前提下接入；当前 OpenCode 与 Claude Agent SDK 共用 DeepSeek，只提供 Driver 级降级。
-- 开放问题：GitHub 是否进入 MVP；Phase 4.2 的 localhost 访问保护、同源/CSRF 策略、内部 HTTP/SSE 合同、幂等与断线恢复规则和前端技术栈仍待技术与安全评审确认。这些问题不影响产品需求收口，但阻塞 Phase 4.2 进入实现。
+- 开放问题：仅 OQ-003“GitHub 是否进入 MVP”继续作为非阻塞问题；Phase 4.2 不再存在阻塞研发的产品或技术开放问题。
 
 当前判断：
 
-- 当前阶段：Phase 4.1 已完成；Phase 4.2 已具备详细需求设计条件，产品规则与可操作原型验证已完成，进入技术与安全合同设计；具体 Driver 继续保持进程外隔离和协议边界。
+- 当前阶段：Phase 4.1 已完成；Phase 4.2 的产品规则、可操作原型和技术安全合同均已完成，达到研发就绪；具体 Driver 继续保持进程外隔离和协议边界。
 - 目标交付与 PRD 深度：完整 PRD。
-- 最大不确定性：localhost 管理写操作的访问保护、同源/CSRF、HTTP/SSE 事件一致性、断线恢复与幂等合同；这些边界必须在 OQ-006 中形成可验证设计。
-- 下一步：关闭 OQ-006，定稿内部 HTTP/SSE 合同、localhost 访问保护、写操作幂等与审计、断线恢复和前端技术栈；完成 Contract 测试计划后才进入实现。
+- 最大实施风险：现有 deny/retry/cleanup/usage 应用层缺口必须先按 ADR-0003 修正；页面不得自行补偿或旁路状态机。
+- 下一步：在单独获得实现授权后，按测试矩阵 Slice A 至 E 推进；技术合同确认不自动授权安装依赖、真实 Provider、提交、推送或 PR。
 
 ## 1. 执行摘要
 
@@ -459,7 +459,7 @@ Driver 必须返回可持久化的外部 Session ID，并声明是否支持精�
 - 一致性规则（已决策；来源：既有 Bridge 权威状态边界与用户确认页面职责）：页面、内部接口和 MCP 不得建立旁路状态、私有状态名称或绕过 Repository/Outbox/审计；同一任务必须呈现一致的状态、事件顺序和错误分类。
 - 安全规则（已决策；来源：既有凭据与审计安全合同）：不得把 Provider 凭据、完整 transcript、内部推理、未脱敏日志或本地敏感路径暴露给 HTTP 响应、页面、命令输出或前端持久化。
 - 当前边界（已决策；来源：用户确认轻量本地浏览器方案）：继续以本地单用户为首个交付范围；不要求 macOS 双击启动，不采用 Electron/Tauri 首版封装；远程 Worker、云控制面、多租户和公网暴露不随内部 HTTP 接口自动进入范围。
-- 候选技术方案：React + TypeScript + Vite 前端，Hono 本地服务，SSE 推送权威事件。该组合尚未通过 OQ-006 技术与安全评审，不得视为已定实现。
+- 技术方案（已决策；来源：[ADR-0003](../adr/0003-local-dashboard-technical-and-security-contract.md)）：首版使用原生 TypeScript/HTML/CSS、Node.js 22 内置 `node:http` 与 SSE，不采用 React/Vite/Hono，不新增外部运行时依赖；内部接口遵循已冻结的 [HTTP/JSON + SSE v1 合同](../contracts/phase-4-2-management-http-sse-v1.md)。
 - 澄清：Phase 4.1 的 preflight 与 content-hash 是窄范围、只读启动辅助入口，不提供通用任务管理，因此不代表 FR-012 已实现。
 
 ### FR-013：审计与脱敏
@@ -1298,9 +1298,9 @@ agent-bridge/
 - 所有观察与写操作复用既有状态机、权限、幂等、Repository、Outbox、Driver Protocol 和审计，不直接读写 SQLite。
 - 首版不提供用户侧通用管理 CLI、公共 API、任务创建、桌面封装、远程 Worker、云控制面、多租户或公网部署。
 - v2 原型已验证：总体运行态识别、阶段识别、普通批准/拒绝、拒绝理由校验、异常定位、高风险二次确认、Token 未上报、加载/空/错误/重连状态。
-- 产品原型通过后进入 OQ-006 技术与安全合同评审，不直接进入实现。
+- OQ-006 已通过 ADR、接口合同和测试矩阵关闭；技术合同确认不自动授权进入实现。
 
-状态：产品范围、信息架构、核心交互和可操作原型验证已完成；技术与安全合同尚未关闭，尚未开始正式实现。
+状态：产品范围、信息架构、核心交互、可操作原型和技术安全合同均已完成；Phase 4.2 研发就绪，尚未获得正式实现授权。
 
 ## 22. 风险、假设与验证计划
 
@@ -1350,6 +1350,7 @@ agent-bridge/
 | 2026-08-11 | 总体运行摘要默认“今日”，可切换本次会话和最近 7 天 | 用户确认汇总信息候选方案并通过 v2 原型 | 汇总任务数、运行中、需处理、Token、耗时区间和 Token 构成先于运行与处置区展示 |
 | 2026-08-11 | 拒绝审批阻止当前方案并带反馈返回 Codex 重新规划 | 用户确认拒绝后的期望行为 | 不取消整个任务、不继续等价动作；越出合同或权限的新路径再次审批 |
 | 2026-08-11 | Phase 4.2 v2 可操作原型通过 | 用户完成验证并确认无其他问题 | 产品需求与交互原型收口；下一门槛为 OQ-006 技术与安全合同 |
+| 2026-08-11 | OQ-006 本地管理页技术与安全合同关闭 | 用户确认 ADR-0003、HTTP/JSON + SSE v1 合同与 Contract 测试矩阵 | 冻结原生 TypeScript、Node 内置 HTTP、SSE、localhost 会话防护、写入并发和实施门禁；Phase 4.2 研发就绪 |
 
 ## 24. 开放问题
 
@@ -1389,15 +1390,18 @@ agent-bridge/
 - 来源：用户于 2026-07-19 表示认可完整分析，并确认将会话隔离、上下文滚动与结构化交接计划更新到原 PRD。
 - 影响：研发不得使用 UI 窗口或最近会话推断任务作用域；必须实现 TaskVersion、Run、Session 绑定、70% 滚动阈值、白名单 Context Package 和 Handoff 完整性校验。
 
-### OQ-006：Phase 4.2 本地管理页技术与安全合同
+### OQ-006：Phase 4.2 本地管理页技术与安全合同（已关闭）
 
-- 状态：开放问题
-- 是否阻塞研发：是；产品与可操作原型验证已经完成。
-- 已确认边界：本地单用户、localhost、由项目命令或 Codex 启动；页面不创建任务；管理状态以 Bridge 应用服务为权威；高风险写操作必须二次确认并审计。
-- 候选默认：React + TypeScript + Vite、Hono、SSE；浏览器使用同源页面，写操作采用明确的本地会话保护和 CSRF 防护。
-- 已验证产品行为：总体摘要、运行中/待审批/异常布局、阶段式进度、右侧详情、批准/带反馈拒绝、高风险二次确认、Token 未上报和页面不创建任务。
-- 待决策：localhost 监听与访问保护、同源/CSRF、HTTP/JSON 与 SSE Schema、游标和断线恢复、写操作幂等与并发冲突、错误映射、静态资源交付、自动打开浏览器边界、前端技术栈和 Contract 测试矩阵。
-- 关闭条件：形成可实现、可测试的技术/安全合同与 ADR；证明页面写操作不能旁路既有权限、状态机、Repository/Outbox 和审计；完成 Contract 测试计划。
+- 状态：已决策；用户于 2026-08-11 确认。
+- 技术来源：[ADR-0003](../adr/0003-local-dashboard-technical-and-security-contract.md)、[HTTP/JSON + SSE v1 合同](../contracts/phase-4-2-management-http-sse-v1.md)和 [Contract 测试矩阵](../testing/phase-4-2-management-contract-test-matrix.md)。
+- 技术栈：原生 TypeScript/HTML/CSS、Node.js 22 内置 `node:http`、SSE；不采用 React/Vite/Hono，不新增外部运行时依赖。
+- 进程与权威边界：同一 `runtime_root` 只允许一个 Bridge 应用实例，共享 MCP、HTTP/SSE、Runtime、应用服务与事件扇出；页面和内部接口不得直读写 SQLite、Artifact、Driver 或 Worker 私有状态。
+- 访问保护：只监听 `127.0.0.1` 随机端口；使用一次性 fragment 启动秘密、实例隔离 host-only Cookie、精确 Host/Origin、同源读取标记和 CSRF；不开放 CORS。
+- 一致性：SSE 只发送安全投影失效通知，使用持久事件游标恢复；断线或未追平期间服务端强制禁止管理写操作。
+- 写入合同：审批、重试、取消和清理必须同时验证幂等键、ETag、当前事件游标和活动 stream；重试、取消和清理还需要绑定目标修订的 60 秒确认 Token。
+- 状态语义：拒绝持久化反馈并以既有 `interrupted/INTERRUPTED` 语义阻止当前方案，返回 Codex 重新规划；重试保留旧 Run，并基于同一冻结 TaskVersion 创建新 Run 与 Session；清理不得删除 Task、事件、审计、Artifact 或保留 worktree。
+- 安全与测试：响应和日志使用严格白名单及脱敏；静态资源固定 manifest；自动 opener 只在恢复和监听成功后执行；105 项 Unit/Contract/Security/Integration/Startup/E2E 用例作为实施门禁。
+- 实施授权：OQ-006 关闭仅表示研发无需自行猜测合同，不自动授权实现、安装依赖、真实 Provider、提交、推送或 PR。
 
 ## 25. 研发交付检查
 
@@ -1420,14 +1424,14 @@ agent-bridge/
 - [x] 核心流程、权限、状态、规则、数据契约、异常和验收行为可追溯。
 - [x] Phase 4.2 用户任务、MVP、非目标、页面职责和高风险边界已确认。
 - [x] Phase 4.2 可操作原型已验证并将反馈回写 FR、BR、异常和验收场景。
-- [ ] OQ-006 localhost、HTTP/SSE、幂等、断线恢复、错误映射和技术栈合同已关闭。
-- [ ] Phase 4.2 Contract 测试矩阵已完成，研发无需自行猜测安全或接口行为。
+- [x] OQ-006 localhost、HTTP/SSE、幂等、断线恢复、错误映射和技术栈合同已关闭。
+- [x] Phase 4.2 Contract 测试矩阵已完成，研发无需自行猜测安全或接口行为。
 
-当前结论：PRD 更新为 `v1.7 / Phase 4.1 已完成、Phase 4.2 产品与原型验证已收口`。FR-012 已定稿本地 Web 形态、总体运行摘要、运行与处置仪表盘、右侧详情、拒绝后重新规划、风险分级、阶段式进度、Token 未上报和不创建任务等产品行为。PRD 已具备详细需求设计条件，但 OQ-006 仍阻塞正式实现，因此尚不标记 Phase 4.2 研发就绪。OQ-003 继续为非阻塞项。
+当前结论：PRD 更新为 `v1.8 / Phase 4.1 已完成、Phase 4.2 研发就绪但尚未授权实现`。FR-012 已定稿产品行为，ADR-0003、HTTP/JSON + SSE v1 合同和 Contract 测试矩阵已关闭 OQ-006。Phase 4.2 不再存在阻塞研发的开放问题；OQ-003 继续为非阻塞项。进入实现、安装依赖、真实 Provider 或 Git 发布仍需各自遵循授权边界。
 
 ## 26. 新研发任务启动指令
 
-将本 PRD 和已验证的 v2 原型作为新任务的产品上下文。下一任务只完成 OQ-006 技术架构与安全合同，不提前开发 Phase 4.2 页面：
+将本 PRD、已验证的 v2 原型、ADR-0003、HTTP/JSON + SSE v1 合同和 Contract 测试矩阵作为 Phase 4.2 实现上下文。开始任何实现前仍需获得用户单独授权：
 
 1. 检查目标工作区、Git 状态和已有技术栈。
 2. 使用已确认的 Node.js 22+、TypeScript 和 pnpm monorepo，不重新选择主技术栈。
@@ -1436,9 +1440,9 @@ agent-bridge/
 5. 使用已经通过统一选型 Spike 的 OpenCode 主 Driver 和 Claude Agent SDK 降级 Driver；未经逐次单独授权不得执行真实 Provider 测试。
 6. 复用已完成的 TaskVersion、TaskRelation、AgentSessionBinding、ContextPackage、HandoffPackage 和 ContinuationSnapshot，不允许旁路这些权威对象。
 7. 新需求和新 TaskVersion 必须创建新 Session；同版本返工可续接；达到 70% 阈值必须在安全边界滚动；任何跨版本复用必须返回稳定错误码。
-8. 只读审计现有 Bridge 应用服务、MCP、Repository/Outbox、事件观察、审批、重试、取消、清理、启动方式和依赖；先给出文件范围、验证计划和依赖边界。
+8. 按测试矩阵 Slice A 至 E 顺序实施；先完成管理读模型与 usage 事实，再修正共享管理命令，之后才实现 HTTP/SSE 与页面。
 9. 正式 Driver 已实现；后续 Provider 配置和凭据只在 Worker/Driver 边界扩展，不得让具体 Provider SDK 或秘密泄漏到 Bridge Core/Driver Protocol。不得重新开放已关闭的产品决策，除非新的兼容性证据证明当前方案技术上不可行。
 10. 不得提交模型凭据、本地数据库、Agent 运行记录、临时 worktree、本地 Agent 规则和过程规划文件。
-11. 定稿 localhost 监听与访问保护、同源/CSRF、HTTP/JSON + SSE Schema、游标与断线恢复、幂等/并发、错误映射、脱敏、自动打开浏览器和静态资源交付合同。
-12. 比较并决定候选前端方案与最小新增依赖；技术选择不得改变 FR-012 的产品行为或引入公共 API、通用管理 CLI、桌面封装和任务创建。
-13. 交付技术 ADR、接口 Schema/Contract 测试矩阵、实施切片与验收门禁；未经用户确认不得安装依赖或进入实现。
+11. 严格实现已冻结的 localhost 访问保护、同源/CSRF、HTTP/JSON + SSE Schema、游标恢复、幂等/并发、错误映射、脱敏、自动 opener 和静态资源合同，不得在实现中自行改口径。
+12. 使用已决定的原生 TypeScript/HTML/CSS、Node.js 22 内置 HTTP 与 SSE；不得自行引入 React、Vite、Hono、公共 API、通用管理 CLI、桌面封装或任务创建。
+13. 默认不新增外部运行时依赖，预期 `pnpm-lock.yaml` 不变化；实现、依赖、真实 Provider、提交、推送和 PR 分别遵循明确授权门禁。
