@@ -3,16 +3,16 @@
 ## 0. 文档状态
 
 - PRD 标识：`PRD-AGENT-BRIDGE-001`
-- 版本：`v1.4`
-- 状态：Phase 4 已完成；Phase 4.1 真实可用性验收进行中
+- 版本：`v1.5`
+- 状态：Phase 4.1 已完成；Phase 4.2 通用管理面进入产品定义与研发准备
 - 文档深度：完整 PRD
 - 负责人：待指定
 - 最近更新：2026-08-11
 - 目标版本：MVP
 - 基线或关联提交：暂无
 - 替代版本：`v1.2`
-- 关联原型：不适用；MVP 为本地 Harness 和控制接口，不包含图形界面
-- 本次主要变更：校正 Phase 1～4 已完成状态；进入 Phase 4.1，补齐严格非敏感 Provider 配置、Driver 专属凭据注入、启动诊断、Codex MCP 注册和正式 loopback 完整 E2E；FR-012 仍为非阻塞通用管理 CLI
+- 关联原型：Phase 4.2 图形管理界面原型待设计与验证
+- 本次主要变更：关闭 Phase 4.1 宿主外 B-simulated 与最小全 Bridge B-real 两项独立门禁；记录用户确认启动 Phase 4.2，开发 FR-012 通用管理 CLI、HTTP API 和图形界面
 
 ### 0.1 来源状态说明
 
@@ -27,19 +27,19 @@
 - 核心场景：由 Codex 负责项目级规划、审查和集成，由受管 Code Agent 完成开发、测试、审查等执行任务。
 - 当前做法：Codex 与各类 Code Agent 是独立工具，默认不共享会话、任务状态、权限和工作区。
 - 主要问题：缺少中立控制层，导致信息难以结构化传递，业务约束可能漂移；不同需求长期复用同一对话还会造成上下文污染，而强制切换窗口又可能丢失关联任务的必要成果。
-- 期望结果：通过独立 Agent Bridge 建立可审计、可隔离、可恢复、可验证的协作流程。
-- 已确认事实：需要独立 Agent Bridge；MVP 采用本地、单用户、单机部署；技术栈采用 Node.js 22+、TypeScript 和 pnpm monorepo；Bridge Core 只依赖版本化 Agent Driver 协议；OpenCode `1.18.3` 为 MVP 主 Driver，Claude Agent SDK `0.3.215` / Claude Code `2.1.215` 为 MVP 降级 Driver；OQ-004 全部规则已定稿；不同需求使用独立 Agent Session，相关需求通过结构化摘要传递必要信息。
+- 期望结果：通过独立 Agent Bridge 建立可审计、可隔离、可恢复、可验证的协作流程，并通过统一管理面降低任务管理、进度观察、审批处理和异常定位成本。
+- 已确认事实：需要独立 Agent Bridge；MVP 采用本地、单用户、单机部署；技术栈采用 Node.js 22+、TypeScript 和 pnpm monorepo；Bridge Core 只依赖版本化 Agent Driver 协议；OpenCode `1.18.3` 为 MVP 主 Driver，Claude Agent SDK `0.3.215` / Claude Code `2.1.215` 为 MVP 降级 Driver；OQ-004 全部规则已定稿；不同需求使用独立 Agent Session，相关需求通过结构化摘要传递必要信息；用户确认 Phase 4.1 验收完成后继续开发 FR-012 通用管理 CLI、HTTP API 和图形界面。
 - 合理推断：MVP 主要面向个人开发环境，而不是团队级云平台。
 - 已验证事实：OpenCode 与 Claude Agent SDK 均已通过 A 层、B-simulated 和 B-real 的适用 Session、事件、取消、权限、恢复、隔离、结果、用量和清理硬门禁；精确上下文用量等增强能力仍允许由 Bridge 估算或持久化机制补偿，但稳定 Session、确定取消和安全隔离不得静默降级。
 - 待验证假设：后续 Provider 级灾备可以在不改变 Driver Protocol 和领域核心的前提下接入；当前 OpenCode 与 Claude Agent SDK 共用 DeepSeek，只提供 Driver 级降级。
-- 开放问题：GitHub 是否进入 MVP；此项不阻塞研发，MVP 默认只依赖本地 Git。
+- 开放问题：GitHub 是否进入 MVP；Phase 4.2 的页面信息架构、HTTP 本地暴露与认证方式、前端技术栈和管理动作权限仍待需求与原型阶段确认。这些问题不影响 Phase 4.1 完成结论，但阻塞 Phase 4.2 进入实现。
 
 当前判断：
 
-- 当前阶段：Phase 4 已完成；Phase 4.1 正在验证真实日常可用性和运行闭环，具体 Driver 继续保持进程外隔离和协议边界。
+- 当前阶段：Phase 4.1 已完成；Phase 4.2 进入详细需求、交互原型和研发准备，具体 Driver 继续保持进程外隔离和协议边界。
 - 目标交付与 PRD 深度：完整 PRD。
 - 最大不确定性：两个已选 Driver 共用 DeepSeek 的 Provider 故障域，以及正式 Driver Contract 与 Spike 事件映射的一致性；必须通过 Contract 测试和默认无费用的兼容性测试持续约束。
-- 下一步：完成 Phase 4.1 无凭据交付门禁；真实 Provider 验收必须另行授权，不能由 B-simulated 或集成模拟替代。
+- 下一步：细化 FR-012 的信息架构、关键异常流程、CLI/API/UI 一致性合同、HTTP 本地暴露与认证方式和前端技术栈，并用可操作原型验证核心任务后进入实现。
 
 ## 1. 执行摘要
 
@@ -176,7 +176,7 @@ Git + CI 或本地验证
 | 语言与运行时 | Node.js 22+、TypeScript | 核心继续使用 TypeScript；特殊 Worker 可独立使用 Go/Rust |
 | 工程组织 | pnpm monorepo | 保持包边界和独立发布能力 |
 | Codex 接口 | MCP stdio | Streamable HTTP MCP 与远程认证 |
-| 管理接口 | MCP stdio；只读 preflight/content-hash 启动辅助入口 | FR-012 通用管理 CLI、HTTP/JSON + OpenAPI、API Gateway、OIDC 和团队权限 |
+| 管理接口 | MCP stdio；只读 preflight/content-hash 启动辅助入口；Phase 4.2 规划本地单用户通用管理 CLI、localhost HTTP/JSON API 和图形界面 | 公网或团队部署时再评估 API Gateway、OIDC 和团队权限 |
 | Agent Driver | 版本化 JSON Schema；本地 JSON-RPC/JSONL over stdio | WebSocket 或 gRPC 远程 Worker 协议 |
 | Agent 接入 | OpenCode 主 Driver + Claude Agent SDK 降级 Driver；具体 SDK、Server 或 CLI 只存在于独立 Driver 子进程 | 远程 Driver、更多 Provider 与独立 Worker 服务 |
 | 本地存储 | SQLite，通过 Repository 接口访问 | PostgreSQL |
@@ -442,14 +442,17 @@ Driver 必须返回可持久化的外部 Session ID，并声明是否支持精�
 - 优先级：Must
 - 主要行为：使用 SQLite 持久化任务、版本、关系、run、Session 绑定、Context Package、Handoff、Snapshot、事件和产物引用；通过 Repository 隔离存储实现；使用事务性 Outbox 保证状态与事件一致；重启后可识别中断任务和合法恢复上下文。
 
-### FR-012：CLI 管理
+### FR-012：通用管理 CLI、HTTP API 与图形界面
 
-- 状态：候选建议
-- 来源：为 MCP 或适配器异常提供人工兜底。
-- 优先级：Should
-- 主要行为：提供任务列表、详情、事件、重试、取消和清理命令。
-- 交付边界：不属于 `v1.4` Phase 4.1 阻塞验收；不得与具体 Agent 的 CLI 降级 Driver 混为同一功能。
-- 澄清：Phase 4.1 的 preflight 与 content-hash 是窄范围、只读启动辅助入口，不提供任务列表、重试、取消或清理，因此不代表 FR-012 已实现。
+- 状态：已决策；Phase 4.2 产品定义与研发准备中
+- 来源：早期人工兜底建议；用户于 2026-08-11 明确要求在 Phase 4.1 验收完成后开发 CLI、HTTP API 和图形化页面，用于管理任务、查看进度、处理待审批项和定位异常。
+- 优先级：Must（Phase 4.2）
+- 用户价值：无需依赖原始 SQLite、Artifact 或 MCP 调试信息，即可用适合人工操作的方式掌握任务全貌并处理异常。
+- 主要行为：CLI、HTTP API 和图形界面复用同一 Bridge 应用服务与权威状态，提供任务列表与详情、运行进度与事件、待审批事项、验证结果、失败/中断原因，以及经权限控制的重试、取消、审批响应和清理入口。
+- 一致性规则：三种入口不得建立旁路状态、私有状态名称或绕过 Repository/Outbox/审计；同一任务在 CLI、API、UI 和 MCP 中必须呈现一致的状态、事件顺序和错误分类。
+- 安全规则：不得把 Provider 凭据、完整 transcript、内部推理、未脱敏日志或本地敏感路径暴露给 HTTP 响应、页面、命令输出或前端持久化。
+- 当前边界：继续以本地单用户为首个交付范围；远程 Worker、云控制面、多租户和公网暴露不随 HTTP API 自动进入范围。
+- 澄清：Phase 4.1 的 preflight 与 content-hash 是窄范围、只读启动辅助入口，不提供通用任务管理，因此不代表 FR-012 已实现。
 
 ### FR-013：审计与脱敏
 
@@ -1205,7 +1208,17 @@ agent-bridge/
 - Service → Bridge → 正式 stdio Worker → 正式 Driver Runtime → loopback Provider → worktree → 权限审批 → 独立验证 → Review/完成，以及重启恢复与取消。
 - B-simulated、Phase 4.1 集成模拟和真实 Provider 验收分别报告，禁止互相替代。
 
-状态：进行中；代码与无凭据 E2E 已具备，待完整交付门禁与真实 Provider 的另行授权验收。
+状态：已完成。代码与无凭据 E2E 已通过完整交付门禁；2026-08-11 在普通 macOS 宿主完成 OpenCode 4 项、Claude fallback 5 项正式 B-simulated，真实 Provider 请求数为 0。随后经独立授权使用 OpenCode 主 Driver 和 `deepseek-v4-pro` 完成最小全 Bridge B-real：3 次真实请求全部返回 `200`，输入 21,930 tokens、输出 331 tokens、费用 `$0.009828`，任务 `COMPLETED`、Run `succeeded`，仅修改范围内文件，独立验证、27 个权威事件的一致性、脱敏和资源清理均通过。
+
+### Phase 4.2：通用管理面
+
+- 以同一 Bridge 应用服务为基础提供通用管理 CLI、HTTP API 和图形界面。
+- 支持任务列表/详情、状态与进度、事件时间线、待审批项、验证结果、失败/中断原因和资源清理状态的统一观察。
+- 支持经权限和审计约束的重试、取消、审批响应与清理操作；不得绕过既有状态机、Repository、Outbox、Driver Protocol 或安全策略。
+- 图形界面优先解决任务管理、进度查看和异常定位，不把远程 Worker、云控制面或多租户纳入首版。
+- 在研发前完成页面信息架构、关键异常流程、HTTP 本地暴露/认证方式和前端技术栈的评审，并用可操作原型验证核心任务。
+
+状态：产品方向已决策，进入详细需求、原型和研发准备；尚未开始实现。
 
 ## 22. 风险、假设与验证计划
 
@@ -1213,8 +1226,8 @@ agent-bridge/
 |---|---|---|---|---|
 | 技术 | 候选 Agent 的 Session、事件、取消或权限能力可能不足 | 影响 Driver 选择和适配设计 | 已验证 | OpenCode 与 Claude Agent SDK 已通过 A 层、B-simulated 和 B-real 适用硬门禁；正式实现继续运行 Contract 测试 |
 | 可用性 | OpenCode 与 Claude Agent SDK 共用 DeepSeek Provider 故障域 | Provider 故障时主/降级 Driver 可能同时不可用 | 已接受缺口 | MVP 明确仅提供 Driver 级降级；后续通过 Driver Protocol 接入独立 Provider 灾备 |
-| 技术 | Codex MCP 与本地 Bridge 的进程生命周期 | 影响启动和恢复 | 已验证 | Phase 3/4 MCP stdio、持久恢复与 Phase 4.1 正式 Driver loopback E2E；真实 Provider 仍需另行授权 |
-| 可用性 | macOS 嵌套 `sandbox-exec` 可能返回 EPERM/code 126 | 影响历史 B-simulated Harness | 已定位 | 启动诊断检查正式 executable；宿主探针失败时明确跳过嵌套 Harness，并由不嵌套沙箱的正式产品 loopback E2E 验证运行路径 |
+| 技术 | Codex MCP 与本地 Bridge 的进程生命周期 | 影响启动和恢复 | 已验证 | Phase 3/4 MCP stdio、持久恢复、Phase 4.1 正式 Driver loopback E2E 与最小全 Bridge B-real 均通过 |
+| 可用性 | macOS 嵌套 `sandbox-exec` 可能返回 EPERM/code 126 | 影响历史 B-simulated Harness | 已闭合 | 受限宿主继续 fail closed；普通 macOS 宿主已完成 OpenCode 与 Claude fallback 全部正式 B-simulated，正式产品 loopback E2E 独立通过 |
 | 安全 | 路径规则可能被符号链接绕过 | 产生越权写入 | 已识别 | 规范化路径并做逃逸测试 |
 | 一致性 | 多 Agent 可能争用同一文件 | 产生冲突和覆盖 | 已识别 | 路径 Owner、租约和 diff 校验 |
 | 运营 | 本机资源不足时并发 Agent 影响开发体验 | 性能下降 | 待验证 | 配置并发上限并记录资源情况 |
@@ -1244,6 +1257,8 @@ agent-bridge/
 | 2026-07-22 | OpenCode `1.18.3` 选为 MVP 主 Driver，Claude Agent SDK `0.3.215` / Claude Code `2.1.215` 选为 MVP 降级 Driver | A 层、B-simulated、B-real 证据及用户确认 | OQ-002 关闭，正式 Driver Contract 与实现解除阻塞 |
 | 2026-07-22 | Codex App 保持用户交互、规划、授权和最终审查入口；Codex SDK B 层延期 | B 层候选范围与用户确认 | 保留 Codex SDK A 层证据，不把延期解释为失败 |
 | 2026-07-22 | OpenCode 与 Claude Agent SDK 共用 DeepSeek，仅提供 Driver 级降级 | Provider 预检、B-real 证据及用户风险接受 | Provider 级灾备作为后续能力，不纳入 MVP 已承诺范围 |
+| 2026-08-11 | Phase 4.1 宿主外 B-simulated 与最小全 Bridge B-real 两项验收均通过 | 正式 Driver、真实 Provider、状态/事件、脱敏和清理证据 | Phase 4.1 完成；付费验证继续保持逐次授权且不进入默认回归 |
+| 2026-08-11 | 启动 Phase 4.2，开发 FR-012 通用管理 CLI、HTTP API 和图形界面 | 用户明确确认任务管理、进度观察、待审批项和异常定位方向 | FR-012 从候选建议升级为已决策；详细交互、接口、安全和技术选型在 Phase 4.2 补齐 |
 
 ## 24. 开放问题
 
@@ -1303,7 +1318,7 @@ agent-bridge/
 - [x] Project Baseline、Context Package、Handoff、任务关系和陈旧依赖规则已确认。
 - [x] 核心流程、权限、状态、规则、数据契约、异常和验收行为可追溯。
 
-当前结论：PRD 更新为 `v1.4 / Phase 4.1 进行中`。Phase 1～4 已完成；严格 Provider/凭据闭环、启动诊断、Codex MCP 注册和正式 loopback E2E 已进入验收。OQ-003 与 FR-012 仍为非阻塞后续项，真实 Provider 验收保持独立授权边界。
+当前结论：PRD 更新为 `v1.5 / Phase 4.1 已完成、Phase 4.2 产品定义与研发准备中`。Phase 4.1 的宿主外 B-simulated 与最小全 Bridge B-real 两项独立门禁均已闭合；付费验证继续保持逐次授权且不进入默认回归。FR-012 已升级为 Phase 4.2 Must，下一步补齐信息架构、核心流程、HTTP/认证、CLI/API/UI 权限映射、前端技术栈和可操作原型后进入实现。OQ-003 仍为非阻塞项。
 
 ## 26. 新研发任务启动指令
 

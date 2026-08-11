@@ -4,7 +4,7 @@ Agent Bridge 是运行在开发者本机的单用户、单机协作控制层，�
 
 它不共享 Agent 的完整聊天记录或内部思考，而是通过版本化任务合同、Session 绑定、权限策略、独立 Git worktree 和结构化 Handoff，让不同 Agent 在明确边界内协作。Codex 负责需求、架构、审查和最终集成；受管 Code Agent 负责开发、测试、审查、文档或研究等执行任务；Git 与可重复验证命令作为代码和质量结果的权威来源。
 
-Phase 4 已完成；当前进入 **Phase 4.1：真实可用性验收与运行闭环**。仓库已经具备领域内核、正式 Agent Driver、受监督 Worker Runtime、本地 MCP stdio 控制入口，以及严格 Provider/凭据注入、启动诊断和正式 loopback E2E。
+Phase 4.1 已完成；当前进入 **Phase 4.2：通用管理面** 的产品定义与研发准备。仓库已经具备领域内核、正式 Agent Driver、受监督 Worker Runtime、本地 MCP stdio 控制入口，以及严格 Provider/凭据注入、启动诊断和正式 loopback E2E；宿主外 B-simulated 与全 Bridge 真实 Provider 两项独立门禁均已闭合。
 
 ## 当前能力
 
@@ -33,7 +33,7 @@ Phase 4 已完成；当前进入 **Phase 4.1：真实可用性验收与运行闭
 ## 尚未完成的产品边界
 
 - Artifact 自动保留期清理、磁盘配额和内容 tombstone 尚未实现；当前只清理失败/过期临时文件并提供孤儿候选预览。
-- FR-012 通用管理 CLI、HTTP API 和图形界面尚未实现；preflight/content-hash 是启动辅助工具，不承担任务管理。
+- FR-012 通用管理 CLI、HTTP API 和图形界面尚未实现；产品方向已确认进入 Phase 4.2，首版聚焦任务管理、进度观察、待审批项和异常定位。preflight/content-hash 仍只是启动辅助工具，不承担任务管理。
 - MVP 只面向本地单用户、单机环境，不支持跨机器 Worker、多租户或云端控制面。
 - Bridge 不自动合并 `main`，最终集成仍由 Codex 或用户确认执行。
 
@@ -118,7 +118,9 @@ pnpm test:e2e:phase4.1
 
 该 E2E 覆盖 Service → Bridge → 正式 stdio Worker → 正式 OpenCode Runtime → loopback Provider → worktree 修改 → 权限审批 → 独立验证 → Review/完成，以及 Bridge 重启恢复、取消、SQLite/Artifact 脱敏和零真实 Provider 请求。
 
-任何真实 Provider 验证都必须单独获得费用与凭据授权。OpenCode 与 Claude Agent SDK 当前共用 DeepSeek，因此只提供 Driver 级降级，不构成 Provider 级灾备。
+Phase 4.1 的两项独立验收门禁已于 2026-08-11 闭合：普通 macOS 宿主上的正式 B-simulated 中，OpenCode 4 项、Claude fallback 5 项全部通过，真实 Provider 请求数为 0；最小全 Bridge B-real 使用 OpenCode 主 Driver 和 `deepseek-v4-pro` 完成 3 次真实请求，全部返回 `200`，输入 21,930 tokens、输出 331 tokens、费用 `$0.009828`，任务状态为 `COMPLETED`、Run 状态为 `succeeded`，仅修改范围内文件，独立验证、事件一致性、脱敏和资源清理均通过。
+
+付费验证不进入默认回归；任何后续真实 Provider 验证仍必须单独获得费用、网络、模型和凭据授权。OpenCode 与 Claude Agent SDK 当前共用 DeepSeek，因此只提供 Driver 级降级，不构成 Provider 级灾备。
 
 ## 文档
 
