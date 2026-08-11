@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Bridge · Phase 4.2 原型 v0</title>
+    <link rel="stylesheet" href="./dashboard-prototype-v0.css" />
+  </head>
+  <body>
+    <div class="prototype-shell has-drawer" data-layout="board" data-density="comfortable">
+      <aside class="side-nav" aria-label="主导航">
+        <div class="product-name">
+          Agent Bridge
+          <span class="prototype-badge">Phase 4.2 · v0</span>
+        </div>
+
+        <nav class="nav-list">
+          <button class="nav-item is-active" type="button">运行与处置</button>
+          <button class="nav-item" type="button" data-placeholder="history">全部任务</button>
+        </nav>
+
+        <div class="connection">
+          <div class="connection-status"><span class="status-dot"></span>Bridge 已连接</div>
+          <div>OpenCode · 本地单用户</div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="workspace-head">
+          <div>
+            <p class="eyebrow">原型演示数据 · 2026-08-11</p>
+            <h1>运行与处置</h1>
+          </div>
+          <p class="head-note">
+            先看清运行态，再处理需要人的事项。这里不创建任务，也不估算百分比。
+          </p>
+        </header>
+
+        <section class="layout layout-board" aria-label="三栏优先级运行板">
+          <div class="board-grid">
+            <section class="lane lane-running">
+              <header class="section-heading">
+                <h2>运行中</h2>
+                <span class="count">02</span>
+              </header>
+              <div class="task-list">
+                <button class="task-row" type="button" data-item="running-primary">
+                  <div class="task-topline">
+                    <span class="task-title">统一 Driver 错误映射</span>
+                    <span class="task-time">18m</span>
+                  </div>
+                  <div class="task-meta">Agent 执行 · normalizeDriverError()</div>
+                  <div class="stage-strip" aria-label="阶段进度">
+                    <span class="stage-step is-done"></span
+                    ><span class="stage-step is-current"></span><span class="stage-step"></span
+                    ><span class="stage-step"></span><span class="stage-step"></span
+                    ><span class="stage-step"></span>
+                  </div>
+                  <div class="task-event">最近：Worker 已写入状态事件</div>
+                  <div class="task-wait">等待原因：无</div>
+                </button>
+                <button class="task-row" type="button" data-item="running-secondary">
+                  <div class="task-topline">
+                    <span class="task-title">补充 stdio Contract 覆盖</span>
+                    <span class="task-time">07m</span>
+                  </div>
+                  <div class="task-meta">独立验证 · Contract 测试</div>
+                  <div class="stage-strip" aria-label="阶段进度">
+                    <span class="stage-step is-done"></span><span class="stage-step is-done"></span
+                    ><span class="stage-step is-done"></span
+                    ><span class="stage-step is-current"></span><span class="stage-step"></span
+                    ><span class="stage-step"></span>
+                  </div>
+                  <div class="task-event">最近：验证环境已准备</div>
+                  <div class="task-wait">等待原因：等待测试结果</div>
+                </button>
+              </div>
+            </section>
+
+            <section class="lane lane-approval">
+              <header class="section-heading">
+                <h2>待审批</h2>
+                <span class="count">01</span>
+              </header>
+              <div class="task-list">
+                <button
+                  class="task-row attention-row is-selected"
+                  type="button"
+                  data-item="approval"
+                >
+                  <div class="task-topline">
+                    <span class="tone-label tone-approval">等待批准</span>
+                    <span class="task-time">03m</span>
+                  </div>
+                  <div class="task-title">执行独立验证命令</div>
+                  <div class="task-event">影响：只读验证，预计 2 分钟</div>
+                </button>
+              </div>
+            </section>
+
+            <section class="lane lane-anomaly">
+              <header class="section-heading">
+                <h2>异常</h2>
+                <span class="count">01</span>
+              </header>
+              <div class="task-list">
+                <button class="task-row attention-row" type="button" data-item="anomaly">
+                  <div class="task-topline">
+                    <span class="tone-label tone-anomaly">范围冲突</span>
+                    <span class="task-time">06m</span>
+                  </div>
+                  <div class="task-title">Worktree 范围冲突</div>
+                  <div class="task-event">建议：确认目标路径后再继续</div>
+                </button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="layout layout-timeline" aria-label="中央阶段时间线">
+          <div class="timeline-grid">
+            <section class="timeline-surface">
+              <div class="flow-header">
+                <div>
+                  <p class="eyebrow">当前主任务</p>
+                  <h2>统一 Driver 错误映射</h2>
+                  <div class="flow-meta">最近事件：Worker 已写入状态事件 · 已耗时 18 分钟</div>
+                </div>
+                <span class="tone-label tone-running">Agent 执行</span>
+              </div>
+              <div class="phase-rail" aria-label="任务阶段">
+                <div class="phase-node is-done">
+                  <div class="phase-name">准备上下文</div>
+                  <div class="phase-detail">合同已验证</div>
+                </div>
+                <div class="phase-node is-current">
+                  <div class="phase-name">Agent 执行</div>
+                  <div class="phase-detail">统一错误映射</div>
+                </div>
+                <div class="phase-node">
+                  <div class="phase-name">等待审批</div>
+                  <div class="phase-detail">等待中</div>
+                </div>
+                <div class="phase-node">
+                  <div class="phase-name">独立验证</div>
+                  <div class="phase-detail">等待中</div>
+                </div>
+                <div class="phase-node">
+                  <div class="phase-name">Review</div>
+                  <div class="phase-detail">等待中</div>
+                </div>
+                <div class="phase-node">
+                  <div class="phase-name">完成</div>
+                  <div class="phase-detail">等待中</div>
+                </div>
+              </div>
+              <div class="task-list">
+                <button class="task-row" type="button" data-item="running-secondary">
+                  <div class="task-topline">
+                    <span class="task-title">补充 stdio Contract 覆盖</span
+                    ><span class="task-time">07m</span>
+                  </div>
+                  <div class="task-meta">独立验证 · 等待测试结果</div>
+                </button>
+              </div>
+            </section>
+
+            <aside class="attention-queue">
+              <section class="queue-group lane-approval">
+                <header class="section-heading">
+                  <h3>待审批</h3>
+                  <span class="count">01</span>
+                </header>
+                <button
+                  class="task-row attention-row is-selected"
+                  type="button"
+                  data-item="approval"
+                >
+                  <div class="task-topline">
+                    <span class="tone-label tone-approval">等待批准</span
+                    ><span class="task-time">03m</span>
+                  </div>
+                  <div class="task-title">执行独立验证命令</div>
+                  <div class="task-event">只读验证 · 预计 2 分钟</div>
+                </button>
+              </section>
+              <section class="queue-group lane-anomaly">
+                <header class="section-heading">
+                  <h3>异常</h3>
+                  <span class="count">01</span>
+                </header>
+                <button class="task-row attention-row" type="button" data-item="anomaly">
+                  <div class="task-topline">
+                    <span class="tone-label tone-anomaly">范围冲突</span
+                    ><span class="task-time">06m</span>
+                  </div>
+                  <div class="task-title">Worktree 范围冲突</div>
+                  <div class="task-event">需要确认任务边界</div>
+                </button>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <section class="layout layout-ledger" aria-label="高密度运行台账">
+          <div class="ledger-attention">
+            <section class="attention-panel approval">
+              <div class="section-heading">
+                <h2>待审批</h2>
+                <span class="count">01</span>
+              </div>
+              <button class="task-row is-selected" type="button" data-item="approval">
+                <div class="task-topline">
+                  <span class="task-title">执行独立验证命令</span><span class="task-time">03m</span>
+                </div>
+                <div class="task-meta">只读验证 · 等待用户批准</div>
+              </button>
+            </section>
+            <section class="attention-panel anomaly">
+              <div class="section-heading">
+                <h2>异常</h2>
+                <span class="count">01</span>
+              </div>
+              <button class="task-row" type="button" data-item="anomaly">
+                <div class="task-topline">
+                  <span class="task-title">Worktree 范围冲突</span
+                  ><span class="task-time">06m</span>
+                </div>
+                <div class="task-meta">建议确认目标路径后继续</div>
+              </button>
+            </section>
+          </div>
+
+          <section class="ledger-surface">
+            <header class="section-heading">
+              <h2>运行中</h2>
+              <span class="count">02</span>
+            </header>
+            <div class="ledger-columns" aria-hidden="true">
+              <span>任务</span><span>当前阶段</span><span>当前步骤</span><span>耗时</span
+              ><span>等待原因</span>
+            </div>
+            <button class="ledger-row" type="button" data-item="running-primary">
+              <span
+                ><span class="ledger-main">统一 Driver 错误映射</span><br /><span class="ledger-sub"
+                  >最近：Worker 已写入状态事件</span
+                ></span
+              >
+              <span class="tone-label tone-running">Agent 执行</span>
+              <span class="ledger-cell">normalizeDriverError()</span>
+              <span class="ledger-cell">18m</span>
+              <span class="ledger-cell">无</span>
+            </button>
+            <button class="ledger-row" type="button" data-item="running-secondary">
+              <span
+                ><span class="ledger-main">补充 stdio Contract 覆盖</span><br /><span
+                  class="ledger-sub"
+                  >最近：验证环境已准备</span
+                ></span
+              >
+              <span class="tone-label tone-running">独立验证</span>
+              <span class="ledger-cell">Contract 测试</span>
+              <span class="ledger-cell">07m</span>
+              <span class="ledger-cell">等待测试结果</span>
+            </button>
+          </section>
+        </section>
+      </main>
+
+      <aside class="detail-drawer" aria-label="任务详情" aria-live="polite">
+        <header class="drawer-head">
+          <div>
+            <span class="tone-label tone-approval" id="drawer-tone">等待批准</span>
+            <h2 id="drawer-title">执行独立验证命令</h2>
+          </div>
+          <button class="close-button" type="button" id="close-drawer">收起</button>
+        </header>
+        <div class="drawer-body">
+          <section class="detail-block">
+            <h3>上下文</h3>
+            <p id="drawer-context">Agent 已完成当前修改，准备在隔离环境中执行只读验证命令。</p>
+          </section>
+          <section class="detail-block">
+            <h3>影响</h3>
+            <p id="drawer-impact">不会修改工作区；预计运行约 2 分钟，可能产生本地测试缓存。</p>
+          </section>
+          <section class="detail-block">
+            <h3>建议</h3>
+            <p id="drawer-advice">确认命令与范围后批准；若范围不符，可拒绝并返回修改意见。</p>
+          </section>
+          <section class="detail-block">
+            <h3>最近事件</h3>
+            <div class="event-line" id="drawer-event">
+              17:44 · approval.requested · 等待用户决定
+            </div>
+          </section>
+        </div>
+        <footer class="drawer-actions">
+          <button class="action-button" type="button" data-action="reject">拒绝</button>
+          <button class="action-button primary" type="button" data-action="approve">批准</button>
+          <div class="danger-placeholder">高风险操作将在完整原型中通过二次确认完成</div>
+        </footer>
+      </aside>
+    </div>
+
+    <button class="tweaks-trigger" type="button" id="tweaks-trigger" aria-expanded="false">
+      原型设置
+    </button>
+    <aside class="tweaks-panel" id="tweaks-panel" aria-label="原型设置">
+      <h2 class="tweaks-title">Tweaks</h2>
+      <p class="tweaks-note">v0 只比较信息结构。三种方向共用同一视觉系统和演示数据。</p>
+      <div class="tweak-options" role="group" aria-label="选择布局">
+        <button class="tweak-option is-active" type="button" data-layout-choice="board">
+          <strong>三栏优先级运行板</strong><span>运行态与注意事项并列扫读</span>
+        </button>
+        <button class="tweak-option" type="button" data-layout-choice="timeline">
+          <strong>中央阶段时间线</strong><span>围绕当前主任务组织信息</span>
+        </button>
+        <button class="tweak-option" type="button" data-layout-choice="ledger">
+          <strong>高密度运行台账</strong><span>顶部先处置，下面批量浏览</span>
+        </button>
+      </div>
+      <hr class="tweak-divider" />
+      <label class="switch-row">紧凑密度 <input type="checkbox" id="density-toggle" /></label>
+    </aside>
+
+    <div class="toast" id="toast" role="status">v0 暂不执行真实操作</div>
+
+    <script src="./dashboard-prototype-v0.js"></script>
+  </body>
+</html>
