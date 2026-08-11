@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Bridge · Phase 4.2 原型 v1</title>
+    <link rel="stylesheet" href="./dashboard-prototype-v0.css" />
+    <link rel="stylesheet" href="./dashboard-prototype-v1-overview.css" />
+  </head>
+  <body>
+    <div class="prototype-shell" data-layout="board" data-density="comfortable">
+      <aside class="side-nav" aria-label="主导航">
+        <div class="product-name">
+          Agent Bridge
+          <span class="prototype-badge">Phase 4.2 · v1</span>
+        </div>
+
+        <nav class="nav-list">
+          <button class="nav-item is-active" type="button">运行与处置</button>
+          <button class="nav-item" type="button" data-placeholder="history">全部任务</button>
+        </nav>
+
+        <div class="connection">
+          <div class="connection-status"><span class="status-dot"></span>Bridge 已连接</div>
+          <div>OpenCode · 本地单用户</div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="workspace-head">
+          <div>
+            <p class="eyebrow">原型演示数据 · 2026-08-11</p>
+            <h1>运行与处置</h1>
+          </div>
+          <p class="head-note">
+            先看总体负载，再进入需要人的运行与处置。这里不创建任务，也不估算百分比。
+          </p>
+        </header>
+
+        <section class="overview" aria-labelledby="overview-title">
+          <header class="overview-head">
+            <div>
+              <p class="section-kicker">概览</p>
+              <h2 id="overview-title">今日运行摘要</h2>
+            </div>
+            <div class="range-switch" role="group" aria-label="统计时间范围">
+              <button type="button" data-range="session" aria-pressed="false">本次会话</button>
+              <button type="button" data-range="today" aria-pressed="true">今日</button>
+              <button type="button" data-range="week" aria-pressed="false">最近 7 天</button>
+            </div>
+          </header>
+
+          <div class="metric-grid">
+            <article class="metric-card">
+              <span class="metric-label">任务总数</span>
+              <strong class="metric-value" id="metric-total">12</strong>
+              <span class="metric-foot" id="metric-total-foot">已完成 8</span>
+            </article>
+            <article class="metric-card running">
+              <span class="metric-label">运行中</span>
+              <strong class="metric-value" id="metric-running">2</strong>
+              <span class="metric-foot">阶段正在推进</span>
+            </article>
+            <article class="metric-card attention">
+              <span class="metric-label">需要处理</span>
+              <strong class="metric-value" id="metric-attention">2</strong>
+              <span class="metric-foot" id="metric-attention-foot">待审批 1 · 异常 1</span>
+            </article>
+            <article class="metric-card token">
+              <span class="metric-label">Token 消耗</span>
+              <strong class="metric-value" id="metric-token">148.6k</strong>
+              <span class="metric-foot" id="metric-token-foot">10 / 12 个任务已上报</span>
+            </article>
+          </div>
+
+          <div class="analytics-grid">
+            <article class="chart-card duration-card">
+              <header class="chart-head">
+                <div>
+                  <h3>任务耗时区间</h3>
+                  <p>按任务当前累计耗时分组</p>
+                </div>
+                <span class="chart-unit" id="duration-unit">12 个任务</span>
+              </header>
+              <div class="duration-bars" id="duration-bars">
+                <div class="duration-row" data-duration="fast">
+                  <span class="duration-label">&lt; 5 分钟</span>
+                  <div class="bar-track"><span class="bar-fill"></span></div>
+                  <span class="duration-value">4 · 33%</span>
+                </div>
+                <div class="duration-row" data-duration="steady">
+                  <span class="duration-label">5–15 分钟</span>
+                  <div class="bar-track"><span class="bar-fill"></span></div>
+                  <span class="duration-value">5 · 42%</span>
+                </div>
+                <div class="duration-row" data-duration="long">
+                  <span class="duration-label">15–30 分钟</span>
+                  <div class="bar-track"><span class="bar-fill"></span></div>
+                  <span class="duration-value">2 · 17%</span>
+                </div>
+                <div class="duration-row is-risk" data-duration="risk">
+                  <span class="duration-label">&gt; 30 分钟</span>
+                  <div class="bar-track"><span class="bar-fill"></span></div>
+                  <span class="duration-value">1 · 8%</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="chart-card token-card" id="token-card">
+              <header class="chart-head">
+                <div>
+                  <h3>Token 构成</h3>
+                  <p>仅统计 Driver 已上报的 usage</p>
+                </div>
+                <span class="reporting-status" id="token-reporting">部分上报</span>
+              </header>
+              <div class="token-summary">
+                <strong id="token-chart-total">148.6k</strong>
+                <span>总消耗</span>
+              </div>
+              <div
+                class="token-stack"
+                id="token-stack"
+                aria-label="Token 构成：输入 104k，输出 31k，缓存 13.6k"
+              >
+                <span class="token-input" style="width: 70%"></span>
+                <span class="token-output" style="width: 21%"></span>
+                <span class="token-cached" style="width: 9%"></span>
+              </div>
+              <div class="token-legend">
+                <span><i class="token-input"></i>输入 <strong id="token-input">104k</strong></span>
+                <span><i class="token-output"></i>输出 <strong id="token-output">31k</strong></span>
+                <span
+                  ><i class="token-cached"></i>缓存 <strong id="token-cached">13.6k</strong></span
+                >
+              </div>
+              <p class="data-note" id="token-note">2 个任务没有 usage 事件，因此未计入总数。</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="layout layout-board" aria-label="三栏优先级运行板">
+          <header class="operations-head">
+            <div>
+              <p class="section-kicker">实时状态</p>
+              <h2>当前运行与处置</h2>
+            </div>
+            <span class="attention-summary">2 项需要人工处理</span>
+          </header>
+          <div class="board-grid">
+            <section class="lane lane-running">
+              <header class="section-heading">
+                <h2>运行中</h2>
+                <span class="count">02</span>
+              </header>
+              <div class="task-list">
+                <button class="task-row" type="button" data-item="running-primary">
+                  <div class="task-topline">
+                    <span class="task-title">统一 Driver 错误映射</span>
+                    <span class="task-time">18m</span>
+                  </div>
+                  <div class="task-meta">Agent 执行 · normalizeDriverError()</div>
+                  <div class="stage-strip" aria-label="阶段进度">
+                    <span class="stage-step is-done"></span
+                    ><span class="stage-step is-current"></span><span class="stage-step"></span
+                    ><span class="stage-step"></span><span class="stage-step"></span
+                    ><span class="stage-step"></span>
+                  </div>
+                  <div class="task-event">最近：Worker 已写入状态事件</div>
+                  <div class="task-wait">等待原因：无</div>
+                </button>
+                <button class="task-row" type="button" data-item="running-secondary">
+                  <div class="task-topline">
+                    <span class="task-title">补充 stdio Contract 覆盖</span>
+                    <span class="task-time">07m</span>
+                  </div>
+                  <div class="task-meta">独立验证 · Contract 测试</div>
+                  <div class="stage-strip" aria-label="阶段进度">
+                    <span class="stage-step is-done"></span><span class="stage-step is-done"></span
+                    ><span class="stage-step is-done"></span
+                    ><span class="stage-step is-current"></span><span class="stage-step"></span
+                    ><span class="stage-step"></span>
+                  </div>
+                  <div class="task-event">最近：验证环境已准备</div>
+                  <div class="task-wait">等待原因：等待测试结果</div>
+                </button>
+              </div>
+            </section>
+
+            <section class="lane lane-approval">
+              <header class="section-heading">
+                <h2>待审批</h2>
+                <span class="count">01</span>
+              </header>
+              <div class="task-list">
+                <button class="task-row attention-row" type="button" data-item="approval">
+                  <div class="task-topline">
+                    <span class="tone-label tone-approval">等待批准</span>
+                    <span class="task-time">03m</span>
+                  </div>
+                  <div class="task-title">执行独立验证命令</div>
+                  <div class="task-event">影响：只读验证，预计 2 分钟</div>
+                </button>
+              </div>
+            </section>
+
+            <section class="lane lane-anomaly">
+              <header class="section-heading">
+                <h2>异常</h2>
+                <span class="count">01</span>
+              </header>
+              <div class="task-list">
+                <button class="task-row attention-row" type="button" data-item="anomaly">
+                  <div class="task-topline">
+                    <span class="tone-label tone-anomaly">范围冲突</span>
+                    <span class="task-time">06m</span>
+                  </div>
+                  <div class="task-title">Worktree 范围冲突</div>
+                  <div class="task-event">建议：确认目标路径后再继续</div>
+                </button>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+
+      <aside
+        class="detail-drawer"
+        aria-label="任务详情"
+        aria-live="polite"
+        aria-hidden="true"
+        inert
+      >
+        <header class="drawer-head">
+          <div>
+            <span class="tone-label tone-approval" id="drawer-tone">等待批准</span>
+            <h2 id="drawer-title">执行独立验证命令</h2>
+          </div>
+          <button class="close-button" type="button" id="close-drawer">收起</button>
+        </header>
+        <div class="drawer-body">
+          <section class="detail-block">
+            <h3>上下文</h3>
+            <p id="drawer-context">Agent 已完成当前修改，准备在隔离环境中执行只读验证命令。</p>
+          </section>
+          <section class="detail-block">
+            <h3>影响</h3>
+            <p id="drawer-impact">不会修改工作区；预计运行约 2 分钟，可能产生本地测试缓存。</p>
+          </section>
+          <section class="detail-block">
+            <h3>建议</h3>
+            <p id="drawer-advice">确认命令与范围后批准；若范围不符，可拒绝并返回修改意见。</p>
+          </section>
+          <section class="detail-block">
+            <h3>最近事件</h3>
+            <div class="event-line" id="drawer-event">
+              17:44 · approval.requested · 等待用户决定
+            </div>
+          </section>
+        </div>
+        <footer class="drawer-actions">
+          <button class="action-button" type="button" data-action="reject">拒绝</button>
+          <button class="action-button primary" type="button" data-action="approve">批准</button>
+          <div class="danger-placeholder">高风险操作将在完整原型中通过二次确认完成</div>
+        </footer>
+      </aside>
+    </div>
+
+    <button class="tweaks-trigger" type="button" id="tweaks-trigger" aria-expanded="false">
+      原型设置
+    </button>
+    <aside class="tweaks-panel" id="tweaks-panel" aria-label="原型设置">
+      <h2 class="tweaks-title">Tweaks</h2>
+      <p class="tweaks-note">v1 已锁定三栏运行板。这里用于验证信息密度与缺失数据状态。</p>
+      <label class="switch-row">紧凑密度 <input type="checkbox" id="density-toggle" /></label>
+      <hr class="tweak-divider" />
+      <label class="switch-row"
+        >模拟 Token 未上报 <input type="checkbox" id="token-missing-toggle"
+      /></label>
+    </aside>
+
+    <div class="toast" id="toast" role="status">v1 暂不执行真实操作</div>
+
+    <script src="./dashboard-prototype-v1.js"></script>
+  </body>
+</html>
