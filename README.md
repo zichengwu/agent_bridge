@@ -4,7 +4,7 @@ Agent Bridge 是运行在开发者本机的单用户、单机协作控制层，�
 
 它不共享 Agent 的完整聊天记录或内部思考，而是通过版本化任务合同、Session 绑定、权限策略、独立 Git worktree 和结构化 Handoff，让不同 Agent 在明确边界内协作。Codex 负责需求、架构、审查和最终集成；受管 Code Agent 负责开发、测试、审查、文档或研究等执行任务；Git 与可重复验证命令作为代码和质量结果的权威来源。
 
-Phase 4.1 已完成；**Phase 4.2：本地管理页** 的产品需求与可操作原型也已收口，下一步是技术架构与安全合同评审。仓库已经具备领域内核、正式 Agent Driver、受监督 Worker Runtime、本地 MCP stdio 控制入口，以及严格 Provider/凭据注入、启动诊断和正式 loopback E2E；宿主外 B-simulated 与全 Bridge 真实 Provider 两项独立门禁均已闭合。
+Phase 4.1 已完成；**Phase 4.2：本地管理页** 的产品需求、可操作原型和 OQ-006 技术安全合同也已收口，当前研发就绪但尚未授权实现。仓库已经具备领域内核、正式 Agent Driver、受监督 Worker Runtime、本地 MCP stdio 控制入口，以及严格 Provider/凭据注入、启动诊断和正式 loopback E2E；宿主外 B-simulated 与全 Bridge 真实 Provider 两项独立门禁均已闭合。
 
 ## 当前能力
 
@@ -34,7 +34,7 @@ Phase 4.1 已完成；**Phase 4.2：本地管理页** 的产品需求与可操�
 
 - Artifact 自动保留期清理、磁盘配额和内容 tombstone 尚未实现；当前只清理失败/过期临时文件并提供孤儿候选预览。
 - FR-012 本地管理页尚未实现。首版由项目命令或 Codex 启动并自动打开浏览器，先展示本次会话/今日/最近 7 天运行摘要，再展示运行中、待审批和异常；页面只观察、审批和控制既有任务，不创建任务，也不提供用户侧通用管理 CLI 或公共 API。
-- Phase 4.2 的 v2 可操作原型已通过产品验证；localhost 访问保护、同源/CSRF、HTTP/JSON + SSE Schema、幂等、断线恢复、错误映射和前端技术栈仍需通过 OQ-006 技术与安全评审，关闭前不进入正式实现。
+- Phase 4.2 的 v2 可操作原型与 OQ-006 技术安全合同均已通过确认；首版采用原生 TypeScript/HTML/CSS、Node.js 22 内置 HTTP 与 SSE，不新增外部运行时依赖。正式实现仍需单独授权，并须通过已冻结的 Contract 测试矩阵。
 - MVP 只面向本地单用户、单机环境，不支持跨机器 Worker、多租户或云端控制面。
 - Bridge 不自动合并 `main`，最终集成仍由 Codex 或用户确认执行。
 
@@ -127,6 +127,9 @@ Phase 4.1 的两项独立验收门禁已于 2026-08-11 闭合：普通 macOS 宿
 
 - [产品需求与验收基线](docs/prd/agent-bridge-prd.md)
 - [Phase 4.2 已验证交互原型](docs/prototypes/phase-4-2-dashboard/dashboard-prototype-v2.html)
+- [Phase 4.2 本地管理页技术与安全 ADR](docs/adr/0003-local-dashboard-technical-and-security-contract.md)
+- [Phase 4.2 HTTP/JSON + SSE v1 合同](docs/contracts/phase-4-2-management-http-sse-v1.md)
+- [Phase 4.2 Contract 测试矩阵](docs/testing/phase-4-2-management-contract-test-matrix.md)
 - [MVP Agent Driver 选型 ADR](docs/adr/0001-agent-driver-selection.md)
 - [Provider 配置与凭据边界 ADR](docs/adr/0002-provider-credentials.md)
 - [中文使用指南](docs/guide/agent-bridge-usage.zh-CN.md)
