@@ -235,6 +235,32 @@ describe.each(repositoryFactories)("Repository 合约：%s", (_label, createRepo
     expect(await repository.getEventCursor()).toBe("event-cursor:1");
   });
 
+  it("WRITE-006 transaction 内重新验证 expected_event_cursor，冲突时不部分写入", async () => {
+    const repository = createRepository();
+    await repository.commit(requestFor("cursor-seed", recordCases[0]!.write, "task.created"));
+    const request = requestFor(
+      "cursor-guard",
+      {
+        kind: "task",
+        expected_revision: 0,
+        value: { ...task, task_id: "task-cursor-guard" },
+      },
+      "task.created",
+    );
+
+    const error = await expectCoreRejection(
+      repository.commit({ ...request, expected_event_cursor: "event-cursor:0" }),
+      "REPOSITORY_WRITE_CONFLICT",
+    );
+
+    expect(error.details.reason).toBe("EVENT_CURSOR_MISMATCH");
+    expect(await repository.getTask("task-cursor-guard")).toBeUndefined();
+    expect(await repository.getEventCursor()).toBe("event-cursor:1");
+    await expect(
+      repository.commit({ ...request, expected_event_cursor: "event-cursor:1" }),
+    ).resolves.toMatchObject({ outcome: "APPLIED", event_cursor: "event-cursor:2" });
+  });
+
   it("按 record_id 提供稳定的内部 Task 扫描分页", async () => {
     const repository = createRepository();
     await repository.commit(requestFor("scan-1", recordCases[0]!.write, "task.created"));

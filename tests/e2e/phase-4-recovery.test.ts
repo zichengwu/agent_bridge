@@ -105,8 +105,19 @@ describe("Phase 4 Bridge 崩溃恢复 E2E", () => {
     ).toBe(0);
     database.close();
 
+    const cancel = (await third.service.previewRunAction({
+      action: "cancel",
+      run_id: prepared.context_package.run_id,
+    })) as {
+      confirmation_token: string;
+      event_cursor: string;
+      target_revision: number;
+    };
     await third.service.cancelTask({
-      task_id: "task-e2e",
+      run_id: prepared.context_package.run_id,
+      confirmation_token: cancel.confirmation_token,
+      event_cursor: cancel.event_cursor,
+      target_revision: cancel.target_revision,
       reason: "Phase 4 cleanup audit",
       idempotency_key: "cancel-e2e",
     });
@@ -131,8 +142,8 @@ describe("Phase 4 Bridge 崩溃恢复 E2E", () => {
       driver_closed: true,
       lease_released: true,
       worktree_retained: true,
-      isolation_retained: true,
-      reason: "run.cancelled",
+      isolation_retained: false,
+      reason: "management.cancelled",
     });
     expect(
       (

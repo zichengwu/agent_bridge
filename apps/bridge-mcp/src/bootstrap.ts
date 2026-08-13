@@ -22,10 +22,12 @@ import {
 import { BridgeControlService } from "./bridge-control-service.js";
 import { controlError } from "./errors.js";
 import { LocalBridgeRuntime } from "./local-runtime.js";
+import type { ManagementCommandService } from "./management-command-service.js";
 import { OutboxPump } from "./outbox-pump.js";
 
 export interface BridgeApplication {
   readonly service: BridgeControlService;
+  readonly management_commands: ManagementCommandService;
   readonly events: PersistentEventFanout;
   close(): Promise<void>;
 }
@@ -80,6 +82,7 @@ export async function bootstrapBridgeApplication(configPath: string): Promise<Br
     outbox.start();
     return Object.freeze({
       service,
+      management_commands: service.management_commands,
       events,
       close: async () => {
         await outbox?.stop();

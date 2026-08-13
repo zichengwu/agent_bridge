@@ -11,6 +11,12 @@ const positive = { type: "integer", minimum: 1 } as const;
 const idempotency = { idempotency_key: id } as const;
 const task = { task_id: id } as const;
 const taskVersion = { task_id: id, task_version: positive } as const;
+const managementPreconditions = {
+  event_cursor: { type: "string", pattern: "^event-cursor:(0|[1-9][0-9]*)$" },
+  target_revision: positive,
+  ...idempotency,
+} as const;
+const runAction = { type: "string", enum: ["retry", "cancel", "cleanup"] } as const;
 const reference = strict({ task_id: id, task_version: positive }, ["task_id", "task_version"]);
 
 export const BRIDGE_TOOLS: readonly BridgeToolDefinition[] = Object.freeze([
@@ -155,17 +161,48 @@ export const BRIDGE_TOOLS: readonly BridgeToolDefinition[] = Object.freeze([
     "响应当前活动运行的待处理审批请求。",
     {
       approval_id: id,
-      decision: { type: "string", enum: ["approve", "deny"] },
+      decision: { type: "string", enum: ["approve", "deny", "reject"] },
       reason: { type: "string", minLength: 1, maxLength: 4096 },
-      ...idempotency,
+      feedback: { type: "string", minLength: 1, maxLength: 2000 },
+      ...managementPreconditions,
     },
-    ["approval_id", "decision", "reason", "idempotency_key"],
+    ["approval_id", "decision", "event_cursor", "target_revision", "idempotency_key"],
+  ),
+  tool(
+    "bridge_preview_run_action",
+    "只读预览重试、取消或安全清理，并签发 60 秒单次确认令牌。",
+    { run_id: id, action: runAction },
+    ["run_id", "action"],
+  ),
+  tool(
+    "bridge_confirm_run_action",
+    "使用预览令牌确认重试、取消或安全清理。",
+    {
+      run_id: id,
+      action: runAction,
+      confirmation_token: { type: "string", minLength: 16, maxLength: 1024 },
+      ...managementPreconditions,
+    },
+    [
+      "run_id",
+      "action",
+      "confirmation_token",
+      "event_cursor",
+      "target_revision",
+      "idempotency_key",
+    ],
   ),
   tool(
     "bridge_cancel_task",
-    "取消当前活动任务并保留审计和产物。",
-    { ...task, reason: { type: "string", minLength: 1, maxLength: 4096 }, ...idempotency },
-    ["task_id", "reason", "idempotency_key"],
+    "兼容入口：使用预览令牌取消当前活动 Run，并保留审计和产物。",
+    {
+      ...task,
+      run_id: id,
+      reason: { type: "string", minLength: 1, maxLength: 4096 },
+      confirmation_token: { type: "string", minLength: 16, maxLength: 1024 },
+      ...managementPreconditions,
+    },
+    ["run_id", "confirmation_token", "event_cursor", "target_revision", "idempotency_key"],
   ),
   tool(
     "bridge_mark_completed",

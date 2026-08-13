@@ -38,6 +38,9 @@ const legalTransitions = [
   ["WAITING_APPROVAL", "INTERRUPT", "INTERRUPTED"],
   ["WAITING_APPROVAL", "FAIL", "FAILED"],
   ["WAITING_APPROVAL", "CANCEL", "CANCELLED"],
+  ["INTERRUPTED", "RETRY", "QUEUED"],
+  ["FAILED", "RETRY", "QUEUED"],
+  ["CANCELLED", "RETRY", "QUEUED"],
   ["VALIDATED", "START_NEW_VERSION", "DRAFT"],
   ["INTERRUPTED", "START_NEW_VERSION", "DRAFT"],
   ["FAILED", "START_NEW_VERSION", "DRAFT"],
@@ -77,16 +80,18 @@ describe("权威 Task 状态机", () => {
     }
   });
 
-  it("终态只允许显式开始新版本，且最终状态集合稳定", () => {
+  it("失败/取消终态允许同冻结版本手工重跑，完成态仍只能开始新版本", () => {
     expect(TASK_FINAL_STATUSES).toEqual(["FAILED", "CANCELLED", "COMPLETED"]);
     for (const status of TASK_FINAL_STATUSES) {
       expect(isTaskFinalStatus(status)).toBe(true);
-      expect(getAllowedTaskTransitionEvents(status)).toEqual(["START_NEW_VERSION"]);
     }
+    expect(getAllowedTaskTransitionEvents("FAILED")).toEqual(["RETRY", "START_NEW_VERSION"]);
+    expect(getAllowedTaskTransitionEvents("CANCELLED")).toEqual(["RETRY", "START_NEW_VERSION"]);
+    expect(getAllowedTaskTransitionEvents("COMPLETED")).toEqual(["START_NEW_VERSION"]);
     expect(isTaskFinalStatus("INTERRUPTED")).toBe(false);
   });
 
-  it("WAITING_APPROVAL 可显式决策，INTERRUPTED 只能开始新版本", () => {
+  it("WAITING_APPROVAL 可显式决策，INTERRUPTED 可重跑或开始新版本", () => {
     expect(getAllowedTaskTransitionEvents("WAITING_APPROVAL")).toEqual([
       "APPROVE_ACTION",
       "DENY_ACTION",
@@ -94,7 +99,7 @@ describe("权威 Task 状态机", () => {
       "FAIL",
       "CANCEL",
     ]);
-    expect(getAllowedTaskTransitionEvents("INTERRUPTED")).toEqual(["START_NEW_VERSION"]);
+    expect(getAllowedTaskTransitionEvents("INTERRUPTED")).toEqual(["RETRY", "START_NEW_VERSION"]);
   });
 
   it("未知状态、未知领域事件和 Driver 事件均稳定拒绝", () => {

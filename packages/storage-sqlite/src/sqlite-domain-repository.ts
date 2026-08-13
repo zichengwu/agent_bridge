@@ -163,6 +163,13 @@ export class SqliteDomainRepository implements DomainRepository, ArtifactReferen
         return replay;
       }
 
+      if (
+        request.expected_event_cursor !== undefined &&
+        request.expected_event_cursor !== encodeEventCursor(this.readMaximumEventSequence())
+      ) {
+        throw writeConflict("EVENT_CURSOR_MISMATCH");
+      }
+
       const prepared = this.prepareRecords(request.records);
       this.validateProspectiveSessionBindings(prepared);
       this.validateEvents(request.events, prepared);

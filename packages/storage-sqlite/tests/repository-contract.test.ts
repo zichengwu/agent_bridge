@@ -185,6 +185,38 @@ describe("SQLite Repository contract", () => {
     expect(await repository.getEventCursor()).toBe("event-cursor:1");
   });
 
+  it("WRITE-006 validates expected_event_cursor inside the SQLite transaction", async () => {
+    const repository = await createRepository();
+    await repository.commit(
+      requestFor(
+        "cursor-seed",
+        { kind: "task", expected_revision: 0, value: taskValue() },
+        "task.created",
+      ),
+    );
+    const request = requestFor(
+      "cursor-guard",
+      {
+        kind: "task",
+        expected_revision: 0,
+        value: { ...taskValue(), task_id: "task-cursor-guard" },
+      },
+      "task.created",
+    );
+
+    await expect(
+      repository.commit({ ...request, expected_event_cursor: "event-cursor:0" }),
+    ).rejects.toMatchObject({
+      code: "REPOSITORY_WRITE_CONFLICT",
+      details: { reason: "EVENT_CURSOR_MISMATCH" },
+    });
+    expect(await repository.getTask("task-cursor-guard")).toBeUndefined();
+    expect(await repository.getEventCursor()).toBe("event-cursor:1");
+    await expect(
+      repository.commit({ ...request, expected_event_cursor: "event-cursor:1" }),
+    ).resolves.toMatchObject({ outcome: "APPLIED", event_cursor: "event-cursor:2" });
+  });
+
   it("supports stable record_id Task scanning without changing the default query contract", async () => {
     const repository = await createRepository();
     await repository.commit(

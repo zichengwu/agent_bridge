@@ -60,11 +60,13 @@ describe("Phase 4.1 正式 stdio Driver loopback E2E", () => {
       });
 
       await waitForTaskStatus(application, contract.task_id, "WAITING_APPROVAL");
-      const approvalId = pendingApprovalId(runtime, prepared.context_package.run_id);
+      const approval = pendingApproval(runtime, prepared.context_package.run_id);
       await application.service.respondToApproval({
-        approval_id: approvalId,
+        approval_id: approval.approval_id,
         decision: "approve",
         reason: "Only src/sum.ts is in scope",
+        event_cursor: eventCursor(runtime),
+        target_revision: approval.revision,
         idempotency_key: "phase41-approve",
       });
       await waitForTaskStatus(application, contract.task_id, "REVIEW_REQUIRED");
@@ -155,10 +157,13 @@ describe("Phase 4.1 正式 stdio Driver loopback E2E", () => {
         idempotency_key: "phase41-recovery-start",
       });
       await waitForTaskStatus(application, contract.task_id, "WAITING_APPROVAL");
+      const approval = pendingApproval(runtime, prepared.context_package.run_id);
       await application.service.respondToApproval({
-        approval_id: pendingApprovalId(runtime, prepared.context_package.run_id),
+        approval_id: approval.approval_id,
         decision: "approve",
         reason: "Allow the scoped fixture edit",
+        event_cursor: eventCursor(runtime),
+        target_revision: approval.revision,
         idempotency_key: "phase41-recovery-approve",
       });
       await provider.waitForRequests(2);
@@ -170,8 +175,19 @@ describe("Phase 4.1 正式 stdio Driver loopback E2E", () => {
       expect(after.metadata.external_driver_run_id).toBe(before.metadata.external_driver_run_id);
       expect(after.metadata.recovery_attempt).toBe(1);
 
+      const cancel = (await application.service.previewRunAction({
+        action: "cancel",
+        run_id: prepared.context_package.run_id,
+      })) as {
+        confirmation_token: string;
+        event_cursor: string;
+        target_revision: number;
+      };
       await application.service.cancelTask({
-        task_id: contract.task_id,
+        run_id: prepared.context_package.run_id,
+        confirmation_token: cancel.confirmation_token,
+        event_cursor: cancel.event_cursor,
+        target_revision: cancel.target_revision,
         reason: "Phase 4.1 recovered-run cancellation",
         idempotency_key: "phase41-recovery-cancel",
       });
@@ -267,13 +283,33 @@ async function waitForTaskStatus(
   throw new Error(`Timed out waiting for ${status}: ${JSON.stringify({ final, events })}`);
 }
 
-function pendingApprovalId(runtime: string, runId: string): string {
+function pendingApproval(
+  runtime: string,
+  runId: string,
+): {
+  approval_id: string;
+  revision: number;
+} {
   const database = new DatabaseSync(resolve(runtime, "agent-bridge.sqlite"));
   const row = database
-    .prepare("SELECT value_json FROM approval_requests WHERE run_id = ? AND status = 'pending'")
-    .get(runId) as { value_json: string };
+    .prepare(
+      "SELECT value_json, revision FROM approval_requests WHERE run_id = ? AND status = 'pending'",
+    )
+    .get(runId) as { value_json: string; revision: number };
   database.close();
-  return (JSON.parse(row.value_json) as { approval_id: string }).approval_id;
+  return {
+    approval_id: (JSON.parse(row.value_json) as { approval_id: string }).approval_id,
+    revision: row.revision,
+  };
+}
+
+function eventCursor(runtime: string): string {
+  const database = new DatabaseSync(resolve(runtime, "agent-bridge.sqlite"));
+  const row = database
+    .prepare("SELECT COALESCE(MAX(sequence), 0) AS sequence FROM domain_events")
+    .get() as { sequence: number };
+  database.close();
+  return `event-cursor:${row.sequence}`;
 }
 
 function runSnapshot(

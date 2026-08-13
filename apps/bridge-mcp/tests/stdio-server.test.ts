@@ -43,8 +43,10 @@ describe("Agent Bridge MCP stdio Server", () => {
     await client.connect(transport);
 
     const listed = await client.listTools();
-    expect(listed.tools).toHaveLength(17);
+    expect(listed.tools).toHaveLength(19);
     expect(listed.tools.map((tool) => tool.name)).toContain("bridge_respond_to_approval");
+    expect(listed.tools.map((tool) => tool.name)).toContain("bridge_preview_run_action");
+    expect(listed.tools.map((tool) => tool.name)).toContain("bridge_confirm_run_action");
     expect(listed.tools.every((tool) => tool.inputSchema.additionalProperties === false)).toBe(
       true,
     );

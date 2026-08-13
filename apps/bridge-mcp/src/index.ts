@@ -10,6 +10,7 @@ export * from "./bridge-control-service.js";
 export * from "./errors.js";
 export * from "./local-runtime.js";
 export * from "./management-projection.js";
+export * from "./management-command-service.js";
 export * from "./outbox-pump.js";
 export * from "./server.js";
 export * from "./tool-contracts.js";

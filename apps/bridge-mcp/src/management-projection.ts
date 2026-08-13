@@ -546,6 +546,12 @@ function taskCardFromFacts(facts: TaskProjectionFacts, now: Date): ManagementTas
   const pendingApproval = [...facts.approvals]
     .reverse()
     .find((approval) => approval.value.status === "pending");
+  const rejectedWorkerApproval = [...facts.approvals]
+    .reverse()
+    .find(
+      (approval) =>
+        approval.value.kind === "driver_permission" && approval.value.status === "denied",
+    );
   const stage = deriveDisplayStage({
     task_status: facts.task.value.status,
     ...(run === undefined ? {} : { run_status: run.value.status }),
@@ -561,7 +567,7 @@ function taskCardFromFacts(facts: TaskProjectionFacts, now: Date): ManagementTas
     authoritative_status: facts.task.value.status,
     display_stage: stage,
     current_step: currentStep(stage),
-    wait_reason: waitReason(facts.task.value.status, stage),
+    wait_reason: waitReason(facts.task.value.status, stage, rejectedWorkerApproval !== undefined),
     elapsed_ms: elapsedMilliseconds(facts.task.value, now),
     latest_event: latestSafeEvent(facts.events, now),
     revision: facts.task.revision,
@@ -684,8 +690,13 @@ function currentStep(stage: ManagementDisplayStage): string {
   }[stage];
 }
 
-function waitReason(status: TaskStatus, stage: ManagementDisplayStage): string | null {
+function waitReason(
+  status: TaskStatus,
+  stage: ManagementDisplayStage,
+  rejectedWorkerApproval: boolean,
+): string | null {
   if (stage === "waiting_approval") return "等待人工审批";
+  if (status === "INTERRUPTED" && rejectedWorkerApproval) return "等待 Codex 重新规划";
   if (status === "INTERRUPTED" || status === "FAILED" || status === "CHANGES_REQUESTED") {
     return "等待人工处理";
   }
