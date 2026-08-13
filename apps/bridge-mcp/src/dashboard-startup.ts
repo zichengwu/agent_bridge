@@ -5,9 +5,9 @@ import { controlError } from "./errors.js";
 import {
   startManagementHttpServer,
   type ManagementHttpAuditEvent,
-  type ManagementStreamGate,
   type StartedManagementHttpServer,
 } from "./management-http.js";
+import { ManagementSseService, type ManagementEventStream } from "./management-sse.js";
 import {
   MANAGEMENT_DASHBOARD_STATIC_MANIFEST,
   MANAGEMENT_DASHBOARD_STATIC_ROOT,
@@ -17,7 +17,7 @@ export type BrowserOpener = (launchUrl: string) => Promise<void>;
 
 export interface BridgeDashboardOptions {
   readonly opener?: BrowserOpener;
-  readonly stream_gate?: ManagementStreamGate;
+  readonly event_stream?: ManagementEventStream;
   readonly audit?: (event: ManagementHttpAuditEvent) => void;
   readonly bootstrap?: (configPath: string) => Promise<BridgeApplication>;
   readonly start_http?: typeof startManagementHttpServer;
@@ -37,6 +37,13 @@ export async function startBridgeDashboard(
   const startHttp = options.start_http ?? startManagementHttpServer;
   const opener = options.opener ?? openDefaultBrowser;
   const application = await bootstrap(configPath);
+  const eventStream =
+    options.event_stream ??
+    new ManagementSseService({
+      fanout: application.events,
+      get_current_cursor: () => application.management_projection.getCurrentCursor(),
+      server_instance_id: application.server_instance_id,
+    });
   let http: StartedManagementHttpServer | undefined;
   try {
     http = await startHttp({
@@ -47,7 +54,7 @@ export async function startBridgeDashboard(
       timezone: application.timezone,
       static_root: MANAGEMENT_DASHBOARD_STATIC_ROOT,
       static_manifest: MANAGEMENT_DASHBOARD_STATIC_MANIFEST,
-      ...(options.stream_gate === undefined ? {} : { stream_gate: options.stream_gate }),
+      event_stream: eventStream,
       ...(options.audit === undefined ? {} : { audit: options.audit }),
     });
     const launchSecret = http.activateLaunchSecret();
