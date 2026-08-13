@@ -40,6 +40,21 @@ const STARTED_AT = "2026-08-13T01:00:00.000Z";
 const NOW = "2026-08-13T02:00:00.000Z";
 
 describe("Phase 4.2 Slice B Management Command Service", () => {
+  it("ARCH-006 活动 Run 缺少安全进程内所有权时保持只读并返回恢复中", async () => {
+    const fixture = await createFixture({ active_owner: false });
+    await expect(
+      fixture.commands.previewRunAction({
+        session_id: "session-mcp",
+        action: "cancel",
+        run_id: "run-1",
+      }),
+    ).rejects.toMatchObject({ code: "RECOVERY_IN_PROGRESS" });
+    expect(await fixture.repository.getAgentRun("run-1")).toMatchObject({
+      value: { status: "waiting_permission" },
+      revision: 1,
+    });
+  });
+
   it("WRITE-001/WRITE-004/WRITE-005 缺幂等键、陈旧事件游标或 revision 均在副作用前拒绝", async () => {
     const fixture = await createFixture();
     const cursor = await fixture.repository.getEventCursor();
@@ -490,6 +505,7 @@ interface FixtureOptions {
   readonly run_status?: AgentRunRecord["status"];
   readonly latest_version?: number;
   readonly now?: () => Date;
+  readonly active_owner?: boolean;
 }
 
 async function createFixture(options: FixtureOptions = {}) {
@@ -499,7 +515,10 @@ async function createFixture(options: FixtureOptions = {}) {
   await seed(repository, taskStatus, runStatus, options.latest_version ?? 1);
   const activeRuns = new ActiveRunRegistry();
   const driver = new RecordingDriver();
-  if (runStatus === "running" || runStatus === "waiting_permission") {
+  if (
+    options.active_owner !== false &&
+    (runStatus === "running" || runStatus === "waiting_permission")
+  ) {
     activeRuns.register({
       run_id: "run-1",
       binding: bindingValue(runStatus === "waiting_permission" ? "ACTIVE" : "ACTIVE"),

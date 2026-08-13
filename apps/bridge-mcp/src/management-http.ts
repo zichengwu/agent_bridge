@@ -13,6 +13,7 @@ import {
   MANAGEMENT_JSON_BODY_LIMIT_BYTES,
   type ManagementProjectionService,
 } from "./management-projection.js";
+import type { ManagementEventStream, ManagementStreamGate } from "./management-sse.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 const SESSION_COOKIE_PREFIX = "agent_bridge_session_";
@@ -36,13 +37,7 @@ export interface ManagementStaticAsset {
   readonly cache: "no-store" | "immutable";
 }
 
-export interface ManagementStreamGate {
-  assertCurrent(input: {
-    readonly session_id: string;
-    readonly stream_id: string;
-    readonly event_cursor?: string;
-  }): Promise<void>;
-}
+export type { ManagementEventStream, ManagementStreamGate } from "./management-sse.js";
 
 export interface ManagementHttpAuditEvent {
   readonly request_id: string;
@@ -68,6 +63,7 @@ export interface ManagementHttpOptions {
   readonly static_root: string;
   readonly static_manifest: readonly ManagementStaticAsset[];
   readonly stream_gate?: ManagementStreamGate;
+  readonly event_stream?: ManagementEventStream;
   readonly now?: () => Date;
   readonly random_bytes?: (size: number) => Buffer;
   readonly audit?: (event: ManagementHttpAuditEvent) => void;
@@ -150,6 +146,7 @@ class ManagementHttpController {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly logoutReplays = new Map<string, LogoutReplay>();
   private readonly streamGate: ManagementStreamGate;
+  private readonly eventStream?: ManagementEventStream;
   private origin: string | undefined;
   private expectedHost: string | undefined;
   private launchSecret: LaunchSecretRecord | undefined;
@@ -162,7 +159,9 @@ class ManagementHttpController {
     this.now = options.now ?? (() => new Date());
     this.randomBytes = options.random_bytes ?? randomBytes;
     this.cookieName = `${SESSION_COOKIE_PREFIX}${this.randomBytes(8).toString("hex")}`;
+    this.eventStream = options.event_stream;
     this.streamGate =
+      options.event_stream ??
       options.stream_gate ??
       Object.freeze({
         assertCurrent: () => Promise.reject(controlError("STREAM_NOT_CURRENT")),
@@ -201,6 +200,7 @@ class ManagementHttpController {
 
   revokeAll(): void {
     this.revokeLaunchSecret();
+    this.eventStream?.stop?.();
     this.sessions.clear();
     this.logoutReplays.clear();
   }
@@ -261,6 +261,10 @@ class ManagementHttpController {
           assertOrigin(request, this.requireOrigin());
           await this.deleteSession(request, response);
         }
+        return;
+      case "events":
+        assertOrigin(request, this.requireOrigin());
+        await this.openEventStream(request, response, url);
         return;
       case "dashboard":
         assertClientMarker(request);
@@ -380,6 +384,7 @@ class ManagementHttpController {
     assertCsrf(request, session.csrf_token);
     const eventCursor = await this.currentCursor();
     const envelope = this.successEnvelope(eventCursor, { revoked: true as const });
+    this.streamGate.revokeSession?.(session.session_id);
     this.sessions.delete(cookieHash);
     this.logoutReplays.set(cookieHash, { idempotency_key: idempotencyKey, response: envelope });
     response.setHeader("Set-Cookie", clearSessionCookie(this.cookieName));
@@ -391,7 +396,7 @@ class ManagementHttpController {
     response: ServerResponse,
     url: URL,
   ): Promise<void> {
-    this.requireSession(request);
+    const session = this.requireSession(request);
     onlyQueryKeys(url, ["range"]);
     const values = url.searchParams.getAll("range");
     if (values.length > 1) throw controlError("VALIDATION_ERROR");
@@ -401,6 +406,7 @@ class ManagementHttpController {
     }
     const snapshot = await this.options.projection.getDashboard(range);
     this.lastEventCursor = snapshot.event_cursor;
+    await this.streamGate.noteSnapshot?.(session.session_id, snapshot.event_cursor);
     sendJson(response, 200, this.successEnvelope(snapshot.event_cursor, snapshot.data));
   }
 
@@ -409,7 +415,7 @@ class ManagementHttpController {
     response: ServerResponse,
     url: URL,
   ): Promise<void> {
-    this.requireSession(request);
+    const session = this.requireSession(request);
     onlyQueryKeys(url, ["status", "cursor", "limit"]);
     if (
       url.searchParams.getAll("cursor").length > 1 ||
@@ -429,6 +435,7 @@ class ManagementHttpController {
     };
     const snapshot = await this.options.projection.listTasks(query);
     this.lastEventCursor = snapshot.event_cursor;
+    await this.streamGate.noteSnapshot?.(session.session_id, snapshot.event_cursor);
     sendJson(response, 200, this.successEnvelope(snapshot.event_cursor, snapshot.data));
   }
 
@@ -437,10 +444,37 @@ class ManagementHttpController {
     response: ServerResponse,
     taskId: string,
   ): Promise<void> {
-    this.requireSession(request);
+    const session = this.requireSession(request);
     const snapshot = await this.options.projection.getTaskDetail(taskId);
     this.lastEventCursor = snapshot.event_cursor;
+    await this.streamGate.noteSnapshot?.(session.session_id, snapshot.event_cursor);
     sendJson(response, 200, this.successEnvelope(snapshot.event_cursor, snapshot.data));
+  }
+
+  private async openEventStream(
+    request: IncomingMessage,
+    response: ServerResponse,
+    url: URL,
+  ): Promise<void> {
+    const session = this.requireSession(request);
+    if (header(request, "accept") !== "text/event-stream") {
+      throw controlError("UNSUPPORTED_MEDIA_TYPE");
+    }
+    onlyQueryKeys(url, ["after"]);
+    const afterValues = url.searchParams.getAll("after");
+    if (afterValues.length > 1) throw controlError("VALIDATION_ERROR");
+    const after = afterValues[0];
+    const lastEventId = header(request, "last-event-id");
+    if (after !== undefined && lastEventId !== undefined && after !== lastEventId) {
+      throw controlError("CURSOR_CONFLICT");
+    }
+    if (this.eventStream === undefined) throw controlError("STREAM_NOT_CURRENT");
+    const resumeCursor = after ?? lastEventId;
+    await this.eventStream.open({
+      session_id: session.session_id,
+      ...(resumeCursor === undefined ? {} : { after_cursor: resumeCursor }),
+      response,
+    });
   }
 
   private async decideApproval(
@@ -644,6 +678,7 @@ type Route =
       readonly name:
         | "session_exchange"
         | "session"
+        | "events"
         | "dashboard"
         | "tasks"
         | "task_detail"
@@ -674,6 +709,12 @@ function classifyRoute(pathname: string): Route {
       kind: "internal",
       name: "dashboard",
       template: "/internal/v1/dashboard",
+      methods: ["GET"],
+    },
+    "/internal/v1/events": {
+      kind: "internal",
+      name: "events",
+      template: "/internal/v1/events",
       methods: ["GET"],
     },
     "/internal/v1/tasks": {
@@ -1113,6 +1154,7 @@ function publicErrorCode(error: unknown): string {
 const HTTP_ERROR_CODES = new Set([
   "VALIDATION_ERROR",
   "REQUEST_BODY_TOO_LARGE",
+  "CURSOR_CONFLICT",
   "IDEMPOTENCY_KEY_REQUIRED",
   "LAUNCH_SECRET_INVALID",
   "SESSION_REQUIRED",
@@ -1135,11 +1177,19 @@ const HTTP_ERROR_CODES = new Set([
   "PRECONDITION_REQUIRED",
   "SNAPSHOT_BUSY",
   "RECOVERY_IN_PROGRESS",
+  "SSE_CONNECTION_LIMIT",
   "INTERNAL_ERROR",
 ]);
 
 function httpStatus(code: string): number {
-  if (["VALIDATION_ERROR", "REQUEST_BODY_TOO_LARGE", "IDEMPOTENCY_KEY_REQUIRED"].includes(code))
+  if (
+    [
+      "VALIDATION_ERROR",
+      "REQUEST_BODY_TOO_LARGE",
+      "CURSOR_CONFLICT",
+      "IDEMPOTENCY_KEY_REQUIRED",
+    ].includes(code)
+  )
     return 400;
   if (["LAUNCH_SECRET_INVALID", "SESSION_REQUIRED", "SESSION_EXPIRED"].includes(code)) return 401;
   if (
@@ -1168,6 +1218,7 @@ function httpStatus(code: string): number {
     return 409;
   if (code === "UNSUPPORTED_MEDIA_TYPE") return 415;
   if (code === "PRECONDITION_REQUIRED") return 428;
+  if (code === "SSE_CONNECTION_LIMIT") return 429;
   if (["SNAPSHOT_BUSY", "RECOVERY_IN_PROGRESS"].includes(code)) return 503;
   return 500;
 }
@@ -1220,6 +1271,9 @@ function publicErrorClassification(code: string): {
       retryable: true,
       message: "服务正在恢复或更新，请稍后重试。",
     };
+  }
+  if (code === "SSE_CONNECTION_LIMIT") {
+    return { category: "capacity", retryable: true, message: "事件连接数量已达到上限。" };
   }
   if (code === "INTERNAL_ERROR")
     return { category: "internal", retryable: false, message: "服务内部错误。" };

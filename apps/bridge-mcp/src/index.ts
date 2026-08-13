@@ -12,6 +12,7 @@ export * from "./errors.js";
 export * from "./instance-lock.js";
 export * from "./local-runtime.js";
 export * from "./management-http.js";
+export * from "./management-sse.js";
 export * from "./management-static-manifest.js";
 export * from "./management-projection.js";
 export * from "./management-command-service.js";
