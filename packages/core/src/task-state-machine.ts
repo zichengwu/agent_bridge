@@ -36,6 +36,7 @@ export const TASK_TRANSITION_EVENTS = [
   "COMPLETE",
   "APPROVE_ACTION",
   "DENY_ACTION",
+  "RETRY",
   "START_NEW_VERSION",
 ] as const;
 
@@ -69,12 +70,15 @@ const TASK_TRANSITIONS: Readonly<
     CANCEL: "CANCELLED",
   },
   INTERRUPTED: {
+    RETRY: "QUEUED",
     START_NEW_VERSION: "DRAFT",
   },
   FAILED: {
+    RETRY: "QUEUED",
     START_NEW_VERSION: "DRAFT",
   },
   CANCELLED: {
+    RETRY: "QUEUED",
     START_NEW_VERSION: "DRAFT",
   },
   SUBMITTED: {

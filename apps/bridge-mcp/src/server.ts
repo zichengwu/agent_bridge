@@ -85,6 +85,10 @@ async function dispatch(
       return service.sendFeedback(args);
     case "bridge_respond_to_approval":
       return service.respondToApproval(args);
+    case "bridge_preview_run_action":
+      return service.previewRunAction(args);
+    case "bridge_confirm_run_action":
+      return service.confirmRunAction(args);
     case "bridge_cancel_task":
       return service.cancelTask(args);
     case "bridge_mark_completed":

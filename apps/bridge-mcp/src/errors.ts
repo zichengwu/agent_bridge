@@ -38,6 +38,23 @@ export function classifyBridgeError(code: string): {
   readonly category: BridgeErrorCategory;
   readonly retryable: boolean;
 } {
+  if (
+    code === "STALE_EVENT_CURSOR" ||
+    code === "ETAG_MISMATCH" ||
+    code === "CONFIRMATION_EXPIRED"
+  ) {
+    return { category: "CONFLICT", retryable: true };
+  }
+  if (
+    code === "IDEMPOTENCY_KEY_REUSED" ||
+    code === "ACTION_NOT_ALLOWED" ||
+    code === "TASK_VERSION_REQUIRED"
+  ) {
+    return { category: "CONFLICT", retryable: false };
+  }
+  if (code === "RECOVERY_IN_PROGRESS") {
+    return { category: "TRANSIENT", retryable: true };
+  }
   if (code === "INTERNAL_ERROR") return { category: "INTERNAL", retryable: false };
   if (code.includes("NOT_FOUND") || code.includes("MISSING")) {
     return { category: "NOT_FOUND", retryable: false };

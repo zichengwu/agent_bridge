@@ -75,6 +75,13 @@ export class InMemoryDomainRepository implements DomainRepository {
       return replayResult(existingIdempotency.result);
     }
 
+    if (
+      request.expected_event_cursor !== undefined &&
+      request.expected_event_cursor !== encodeEventCursor(this.events.length)
+    ) {
+      throw writeConflict("EVENT_CURSOR_MISMATCH");
+    }
+
     const preparedRecords: readonly PreparedRecord[] = request.records.map((write) => {
       const recordId = getDomainRecordId(write.kind, write.value);
       const current = this.records.get(encodeRecordKey(write.kind, recordId));

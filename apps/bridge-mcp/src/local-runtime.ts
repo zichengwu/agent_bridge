@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, realpath } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 
 import {
@@ -46,6 +46,8 @@ import type {
   BridgeRuntimePort,
   BridgeStartRequest,
   BridgeStartResult,
+  BridgeCleanupInspection,
+  BridgeCleanupResult,
 } from "./bridge-control-service.js";
 import { controlError } from "./errors.js";
 
@@ -60,12 +62,13 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
     string,
     { readonly path: string; readonly task_version: import("@agent-bridge/schemas").TaskVersion }
   >();
+  private readonly cleanupTasks = new Map<string, Promise<BridgeCleanupResult>>();
 
   constructor(
     private readonly repository: DomainRepository,
     private readonly activeRuns: ActiveRunRegistry,
     private readonly configuration: AgentBridgeRuntimeConfiguration,
-    leases: LeaseManager,
+    private readonly leases: LeaseManager,
     private readonly artifacts: ArtifactRepository,
   ) {
     this.worktrees = new GitWorktreeManager(this.git, leases);
@@ -92,8 +95,12 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
     }
   }
 
-  async cleanupResources(runId: string, reason: string): Promise<void> {
-    await this.cleanupTerminalResources(runId, reason);
+  async previewCleanupResources(runId: string): Promise<BridgeCleanupInspection> {
+    return this.inspectCleanupResources(runId);
+  }
+
+  async cleanupResources(runId: string, reason: string): Promise<BridgeCleanupResult> {
+    return this.runCleanupSerialized(runId, reason);
   }
 
   async start(request: BridgeStartRequest): Promise<BridgeStartResult> {
@@ -119,12 +126,38 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
     const pending = this.runWorktrees.get(runId);
     const existingOwnership =
       pending === undefined ? undefined : this.worktrees.getOwnership(pending.path);
+    const retrySource =
+      request.previous_run_id === undefined
+        ? undefined
+        : await this.repository.getAgentRun(request.previous_run_id);
+    if (
+      request.previous_run_id !== undefined &&
+      (retrySource === undefined ||
+        retrySource.value.task_id !== request.task_version.task_id ||
+        retrySource.value.task_version !== request.task_version.task_version ||
+        !["failed", "cancelled", "interrupted"].includes(retrySource.value.status))
+    ) {
+      throw controlError("ACTION_NOT_ALLOWED");
+    }
+    if (retrySource !== undefined) {
+      await this.runCleanupSerialized(retrySource.value.run_id, `management.retry:${runId}`);
+    }
+    const retryWorktreePath = metadataString(retrySource?.value.metadata, "worktree_path");
+    if (
+      retryWorktreePath !== undefined &&
+      resolve(worktreesRoot, basename(retryWorktreePath)) !== resolve(retryWorktreePath)
+    ) {
+      throw controlError("GIT_WORKTREE_CONFLICT");
+    }
     const ownership =
       existingOwnership ??
       (await this.worktrees.ensure({
         repositoryPath: this.configuration.project.workspace_root,
         worktreesRoot,
-        worktreeName: `${request.task_version.task_id}-v${request.task_version.task_version}-${runId.slice(0, 8)}`,
+        worktreeName:
+          retryWorktreePath === undefined
+            ? `${request.task_version.task_id}-v${request.task_version.task_version}-${runId.slice(0, 8)}`
+            : basename(retryWorktreePath),
         branch: request.task_version.git.branch,
         sourceRef: "HEAD",
         baseCommit: request.task_version.base_commit,
@@ -148,6 +181,7 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
         inspected = await this.createDriver(
           ownership.worktreePath,
           this.configuration.drivers.primary,
+          runId,
         );
         [primaryHealth, primaryCapabilities] = await Promise.all([
           inspected.healthCheck(),
@@ -184,7 +218,7 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
         if (!fallbackConfig.enabled || fallbackConfig.executable === undefined) {
           throw controlError("NO_DRIVER_AVAILABLE");
         }
-        inspected = await this.createDriver(ownership.worktreePath, fallbackConfig);
+        inspected = await this.createDriver(ownership.worktreePath, fallbackConfig, runId);
         const [fallbackHealth, fallbackCapabilities] = await Promise.all([
           inspected.healthCheck(),
           inspected.describeCapabilities(),
@@ -254,7 +288,7 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
             selectedDriverId === "opencode"
               ? this.configuration.drivers.primary
               : this.configuration.drivers.fallback;
-          inspected = await this.createDriver(ownership.worktreePath, configuration);
+          inspected = await this.createDriver(ownership.worktreePath, configuration, runId);
           return inspected;
         },
       };
@@ -275,6 +309,10 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
           worktree_base_commit: ownership.baseCommit,
           lease_id: ownership.lease.leaseId,
           lease_expires_at: ownership.lease.expiresAt,
+          isolation_root: this.isolationRoot(selectedDriverId, runId),
+          ...(request.previous_run_id === undefined
+            ? {}
+            : { retry_source_run_id: request.previous_run_id }),
         },
         create_audit: audit("bridge_start_task_create", `${request.idempotency_key}:create`, now),
         outcome_audit: audit(
@@ -558,14 +596,11 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
   private async createDriver(
     workDirectory: string,
     config: RuntimeDriverConfiguration,
+    bridgeRunId: string,
     recoveryStates?: readonly import("@agent-bridge/driver-protocol").JsonObject[],
   ): Promise<StdioAgentDriverClient> {
-    const isolationRoot = resolve(
-      this.configuration.project.runtime_root,
-      "isolation",
-      config.id,
-      stableId("worker", workDirectory),
-    );
+    const isolationRoot = this.isolationRoot(config.id, bridgeRunId);
+    await ensureIsolationOwnership(isolationRoot, bridgeRunId);
     const isolation = {
       homeDirectory: resolve(isolationRoot, "home"),
       tempDirectory: resolve(isolationRoot, "tmp"),
@@ -766,7 +801,9 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
       ) {
         throw recoveryDenied("DRIVER_CONFIGURATION_MISMATCH");
       }
-      const driver = await this.createDriver(ownership.worktreePath, driverConfig, [recoveryState]);
+      const driver = await this.createDriver(ownership.worktreePath, driverConfig, runId, [
+        recoveryState,
+      ]);
       try {
         const [health, capabilities] = await Promise.all([
           driver.healthCheck(),
@@ -1123,7 +1160,7 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
       try {
         await this.listener?.(active.run_id, driverEvent);
       } finally {
-        void this.cleanupTerminalResources(active.run_id, driverEvent.type).catch(() => undefined);
+        void this.runCleanupSerialized(active.run_id, driverEvent.type).catch(() => undefined);
       }
       return;
     }
@@ -1131,23 +1168,114 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
     await this.listener?.(active.run_id, driverEvent);
   }
 
-  private async cleanupTerminalResources(runId: string, reason: string): Promise<void> {
-    const managed = this.runWorktrees.get(runId);
-    await this.activeRuns.close(runId);
-    let leaseReleased = false;
-    if (managed !== undefined) {
-      this.worktrees.release(managed.path, runId);
-      leaseReleased = true;
-    }
+  private isolationRoot(driverId: string, runId: string): string {
+    return resolve(this.configuration.project.runtime_root, "isolation", driverId, runId);
+  }
+
+  private async inspectCleanupResources(runId: string): Promise<BridgeCleanupInspection> {
     const run = await this.repository.getAgentRun(runId);
-    if (run === undefined) {
-      this.runWorktrees.delete(runId);
-      return;
+    if (run === undefined) throw controlError("RUN_NOT_FOUND");
+    const targets: Array<BridgeCleanupInspection["targets"][number]> = [];
+    const warnings: string[] = [];
+    if (this.activeRuns.get(runId) !== undefined) {
+      targets.push({ kind: "child_process", target_id: `driver:${runId}`, ownership: "owned" });
+    }
+    const worktreePath = metadataString(run.value.metadata, "worktree_path");
+    const leaseId = metadataString(run.value.metadata, "lease_id") ?? `lease:${runId}`;
+    const lease = this.leases.snapshot().find((item) => item.leaseId === leaseId);
+    if (lease !== undefined) {
+      const expectedResources = [
+        `task:${run.value.task_id}:v${run.value.task_version}`,
+        ...(worktreePath === undefined ? [] : [`worktree:${worktreePath}`]),
+      ];
+      const owned =
+        lease.ownerId === runId &&
+        expectedResources.every((resource) => lease.resources.includes(resource));
+      targets.push({
+        kind: "lease",
+        target_id: `lease:${runId}`,
+        ownership: owned ? "owned" : "unverified",
+      });
+      if (!owned) warnings.push("检测到租约但无法证明属于目标 Run，已拒绝清理该租约");
+    }
+    const isolationRoot =
+      metadataString(run.value.metadata, "isolation_root") ??
+      this.isolationRoot(run.value.driver_id, runId);
+    const isolation = await inspectIsolationOwnership(
+      isolationRoot,
+      this.isolationRoot(run.value.driver_id, runId),
+      runId,
+    );
+    if (isolation !== "missing") {
+      targets.push({
+        kind: "runtime_directory",
+        target_id: `runtime:${runId}`,
+        ownership: isolation,
+      });
+      if (isolation === "unverified") {
+        warnings.push("检测到 runtime 临时目录但无法证明属于目标 Run，已拒绝清理该目录");
+      }
+    }
+    return Object.freeze({
+      targets: Object.freeze(targets.map((target) => Object.freeze(target))),
+      warnings: Object.freeze(warnings),
+    });
+  }
+
+  private async cleanupTerminalResources(
+    runId: string,
+    reason: string,
+  ): Promise<BridgeCleanupResult> {
+    const inspection = await this.inspectCleanupResources(runId);
+    const run = await this.repository.getAgentRun(runId);
+    if (run === undefined) throw controlError("RUN_NOT_FOUND");
+    const removed: string[] = [];
+    const refused = inspection.targets
+      .filter((target) => target.ownership === "unverified")
+      .map((target) => target.target_id);
+    const managed = this.runWorktrees.get(runId);
+    if (
+      inspection.targets.some(
+        (target) => target.kind === "child_process" && target.ownership === "owned",
+      )
+    ) {
+      await this.activeRuns.close(runId);
+      removed.push(`driver:${runId}`);
+    }
+    if (
+      inspection.targets.some((target) => target.kind === "lease" && target.ownership === "owned")
+    ) {
+      if (managed !== undefined) {
+        this.worktrees.release(managed.path, runId);
+      } else {
+        this.leases.release(
+          metadataString(run.value.metadata, "lease_id") ?? `lease:${runId}`,
+          runId,
+        );
+      }
+      removed.push(`lease:${runId}`);
+    }
+    if (
+      inspection.targets.some(
+        (target) => target.kind === "runtime_directory" && target.ownership === "owned",
+      )
+    ) {
+      await removeOwnedIsolationRoot(
+        metadataString(run.value.metadata, "isolation_root") ??
+          this.isolationRoot(run.value.driver_id, runId),
+        this.isolationRoot(run.value.driver_id, runId),
+        runId,
+      );
+      removed.push(`runtime:${runId}`);
     }
     const priorCleanup = metadataRecord(run.value.metadata, "resource_cleanup");
-    if (priorCleanup?.driver_closed === true) {
+    if (removed.length === 0 && refused.length === 0 && priorCleanup?.driver_closed === true) {
       this.runWorktrees.delete(runId);
-      return;
+      return Object.freeze({
+        ...inspection,
+        removed_targets: Object.freeze([]),
+        refused_targets: Object.freeze([]),
+      });
     }
     const now = new Date().toISOString();
     const requestId = stableId("request", `cleanup:${runId}:${reason}`);
@@ -1156,7 +1284,7 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
       idempotency: {
         operation: "bridge_cleanup_terminal_resources",
         key: `cleanup:${runId}:${reason}`,
-        request_hash: computeContentHash({ run_id: runId, reason, lease_released: leaseReleased }),
+        request_hash: computeContentHash({ run_id: runId, reason, removed, refused }),
       },
       records: [
         {
@@ -1168,10 +1296,12 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
             metadata: {
               ...run.value.metadata,
               resource_cleanup: {
-                driver_closed: true,
-                lease_released: leaseReleased,
-                worktree_retained: managed !== undefined,
-                isolation_retained: true,
+                driver_closed: this.activeRuns.get(runId) === undefined,
+                lease_released: !this.leases.snapshot().some((lease) => lease.ownerId === runId),
+                worktree_retained: worktreePathRetained(run.value.metadata),
+                isolation_retained: !removed.includes(`runtime:${runId}`),
+                removed_count: removed.length,
+                refused_count: refused.length,
                 reason,
                 audited_at: now,
               },
@@ -1197,14 +1327,30 @@ export class LocalBridgeRuntime implements BridgeRuntimePort {
             run_id: runId,
           },
           payload: {
-            driver_closed: true,
-            lease_released: leaseReleased,
-            worktree_retained: managed !== undefined,
+            driver_closed: this.activeRuns.get(runId) === undefined,
+            lease_released: !this.leases.snapshot().some((lease) => lease.ownerId === runId),
+            worktree_retained: worktreePathRetained(run.value.metadata),
+            removed_count: removed.length,
+            refused_count: refused.length,
           },
         },
       ],
     });
     this.runWorktrees.delete(runId);
+    return Object.freeze({
+      ...inspection,
+      removed_targets: Object.freeze(removed),
+      refused_targets: Object.freeze(refused),
+    });
+  }
+
+  private runCleanupSerialized(runId: string, reason: string): Promise<BridgeCleanupResult> {
+    const pending = this.cleanupTasks.get(runId);
+    if (pending !== undefined) return pending;
+    const task = this.cleanupTerminalResources(runId, reason);
+    this.cleanupTasks.set(runId, task);
+    void task.finally(() => this.cleanupTasks.delete(runId)).catch(() => undefined);
+    return task;
   }
 }
 
@@ -1259,6 +1405,69 @@ function event(
 
 function stableId(prefix: string, key: string): string {
   return `${prefix}-${createHash("sha256").update(key).digest("hex").slice(0, 24)}`;
+}
+
+const ISOLATION_OWNER_FILE = ".agent-bridge-owner.json";
+
+async function ensureIsolationOwnership(root: string, runId: string): Promise<void> {
+  await mkdir(root, { recursive: true });
+  const status = await inspectIsolationOwnership(root, root, runId);
+  if (status === "owned") return;
+  if (status === "unverified") throw controlError("RUNTIME_OWNERSHIP_INVALID");
+  try {
+    await writeFile(
+      resolve(root, ISOLATION_OWNER_FILE),
+      JSON.stringify({ schema_version: 1, run_id: runId }),
+      { encoding: "utf8", flag: "wx", mode: 0o600 },
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  if ((await inspectIsolationOwnership(root, root, runId)) !== "owned") {
+    throw controlError("RUNTIME_OWNERSHIP_INVALID");
+  }
+}
+
+async function inspectIsolationOwnership(
+  root: string,
+  expectedRoot: string,
+  runId: string,
+): Promise<"owned" | "unverified" | "missing"> {
+  if (resolve(root) !== resolve(expectedRoot)) return "unverified";
+  try {
+    const status = await lstat(root);
+    if (!status.isDirectory() || status.isSymbolicLink()) return "unverified";
+    const [canonicalRoot, canonicalExpectedRoot] = await Promise.all([
+      realpath(root),
+      realpath(expectedRoot),
+    ]);
+    if (canonicalRoot !== canonicalExpectedRoot) return "unverified";
+    const marker = JSON.parse(await readFile(resolve(root, ISOLATION_OWNER_FILE), "utf8")) as {
+      schema_version?: unknown;
+      run_id?: unknown;
+    };
+    return marker.schema_version === 1 && marker.run_id === runId ? "owned" : "unverified";
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "ENOENT" ? "missing" : "unverified";
+  }
+}
+
+async function removeOwnedIsolationRoot(
+  root: string,
+  expectedRoot: string,
+  runId: string,
+): Promise<void> {
+  if ((await inspectIsolationOwnership(root, expectedRoot, runId)) !== "owned") {
+    throw controlError("RUNTIME_OWNERSHIP_INVALID");
+  }
+  await rm(resolve(expectedRoot), { recursive: true, force: false });
+}
+
+function worktreePathRetained(
+  metadata: import("@agent-bridge/schemas").DomainMetadata | undefined,
+): boolean {
+  return metadataString(metadata, "worktree_path") !== undefined;
 }
 
 function metadataRecord(

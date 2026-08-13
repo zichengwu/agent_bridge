@@ -2,7 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 
 import {
   computeContentHash,
-  decideApprovalRequest,
   getDomainRecordId,
   readReviewCycle,
   transitionAgentRunStatus,
@@ -33,6 +32,7 @@ import {
 } from "@agent-bridge/worker-runtime";
 
 import { controlError } from "./errors.js";
+import { ManagementCommandService } from "./management-command-service.js";
 import { taskResultUsageFromAgentResult } from "./usage-facts.js";
 
 const ACTOR: AuditActor = Object.freeze({ kind: "bridge", id: "bridge-mcp" });
@@ -42,6 +42,23 @@ export interface BridgeStartRequest {
   readonly task_version: TaskVersion;
   readonly context_package_id: string;
   readonly idempotency_key: string;
+  readonly previous_run_id?: string;
+}
+
+export interface BridgeCleanupTarget {
+  readonly kind: "child_process" | "lease" | "runtime_directory";
+  readonly target_id: string;
+  readonly ownership: "owned" | "unverified";
+}
+
+export interface BridgeCleanupInspection {
+  readonly targets: readonly BridgeCleanupTarget[];
+  readonly warnings: readonly string[];
+}
+
+export interface BridgeCleanupResult extends BridgeCleanupInspection {
+  readonly removed_targets: readonly string[];
+  readonly refused_targets: readonly string[];
 }
 
 export type BridgeStartResult =
@@ -64,7 +81,12 @@ export interface BridgeRuntimePort {
     idempotencyKey: string,
   ): Promise<Readonly<Record<string, unknown>>>;
   collectOutcome(runId: string): Promise<BridgeRunOutcome>;
-  cleanupResources?(runId: string, reason: string): Promise<void>;
+  previewCleanupResources?(runId: string): Promise<BridgeCleanupInspection>;
+  cleanupResources?(
+    runId: string,
+    reason: string,
+    expectedPreviewHash?: string,
+  ): Promise<BridgeCleanupResult | void>;
 }
 
 export interface BridgeRunOutcome {
@@ -86,15 +108,29 @@ export interface BridgeControlServiceOptions {
   readonly max_agent_count: number;
   readonly now?: () => Date;
   readonly create_id?: () => string;
+  readonly management_commands?: ManagementCommandService;
 }
 
 export class BridgeControlService {
   private readonly now: () => Date;
   private readonly createId: () => string;
+  readonly management_commands: ManagementCommandService;
 
   constructor(private readonly options: BridgeControlServiceOptions) {
     this.now = options.now ?? (() => new Date());
     this.createId = options.create_id ?? randomUUID;
+    this.management_commands =
+      options.management_commands ??
+      new ManagementCommandService({
+        repository: options.repository,
+        contexts: options.contexts,
+        active_runs: options.active_runs,
+        runtime: options.runtime,
+        project_id: options.project_id,
+        repository_path: options.repository_path,
+        ...(options.now === undefined ? {} : { now: options.now }),
+        ...(options.create_id === undefined ? {} : { create_id: options.create_id }),
+      });
   }
 
   async createTask(args: JsonObject): Promise<unknown> {
@@ -511,148 +547,67 @@ export class BridgeControlService {
   }
 
   async respondToApproval(args: JsonObject): Promise<unknown> {
-    const approvalId = stringArg(args, "approval_id");
-    const stored = await this.options.repository.getApprovalRequest(approvalId);
-    if (stored === undefined) throw controlError("APPROVAL_NOT_FOUND");
     const decision = stringArg(args, "decision");
-    if (decision !== "approve" && decision !== "deny") throw controlError("APPROVAL_INVALID");
-    if (stored.value.kind === "control_operation") {
-      if (stored.value.status !== "pending") {
-        if (
-          stored.value.status === (decision === "approve" ? "approved" : "denied") &&
-          stored.value.reason === stringArg(args, "reason")
-        ) {
-          return stored.value;
-        }
-        throw controlError("APPROVAL_STALE");
-      }
-      const decided = {
-        ...decideApprovalRequest(
-          stored.value,
-          decision === "approve" ? "approved" : "denied",
-          "controller",
-          stringArg(args, "reason"),
-          this.now().toISOString(),
-        ),
-        metadata: { ...stored.value.metadata, delivery_status: "not_applicable" },
-      };
-      const task = await this.requireTask(decided.task_id);
-      if (task.value.status !== "WAITING_APPROVAL") throw controlError("APPROVAL_STALE");
-      const resumed = transitionTask(
-        task.value,
-        decision === "approve" ? "APPROVE_ACTION" : "DENY_ACTION",
-        decided.decided_at!,
-      );
-      const key = stringArg(args, "idempotency_key");
-      await this.commitRecords("bridge_respond_to_approval", key, [
-        { kind: "approval_request", expected_revision: stored.revision, value: decided },
-        { kind: "task", expected_revision: task.revision, value: resumed },
-      ]);
-      if (decision === "deny") {
-        const current = await this.requireTask(task.value.task_id);
-        const failed = transitionTask(current.value, "FAIL", this.now().toISOString());
-        await this.commitRecords("bridge_fallback_denied", `${key}:denied`, [
-          { kind: "task", expected_revision: current.revision, value: failed },
-        ]);
-      }
-      return decided;
+    if (decision !== "approve" && decision !== "deny" && decision !== "reject") {
+      throw controlError("APPROVAL_INVALID");
     }
-    if (
-      stored.value.status === (decision === "approve" ? "approved" : "denied") &&
-      stored.value.reason === stringArg(args, "reason")
-    ) {
-      if (stored.value.metadata?.delivery_status === "delivered") return stored.value;
-      this.options.active_runs.require(stored.value.run_id);
-      await this.deliverApproval(stored.value, decision);
-      return this.markApprovalDelivered(
-        stored.value.approval_id,
-        stringArg(args, "idempotency_key"),
-      );
-    }
-    this.options.active_runs.require(stored.value.run_id);
-    const decisionRecord = decideApprovalRequest(
-      stored.value,
-      decision === "approve" ? "approved" : "denied",
-      "controller",
-      stringArg(args, "reason"),
-      this.now().toISOString(),
-    );
-    const decided = {
-      ...decisionRecord,
-      metadata: { ...decisionRecord.metadata, delivery_status: "pending" },
-    };
-    const [task, run] = await Promise.all([
-      this.requireTask(decided.task_id),
-      this.options.repository.getAgentRun(decided.run_id),
-    ]);
-    if (
-      run === undefined ||
-      task.value.status !== "WAITING_APPROVAL" ||
-      run.value.status !== "waiting_permission"
-    ) {
-      throw controlError("APPROVAL_STALE");
-    }
-    const resumedTask = transitionTask(
-      task.value,
-      decision === "approve" ? "APPROVE_ACTION" : "DENY_ACTION",
-      decided.decided_at!,
-    );
-    const resumedRun = {
-      ...run.value,
-      status: transitionAgentRunStatus(run.value.status, "RESUME"),
-      updated_at: decided.decided_at!,
-    };
-    await this.commitRecords("bridge_respond_to_approval", stringArg(args, "idempotency_key"), [
-      { kind: "approval_request", expected_revision: stored.revision, value: decided },
-      { kind: "task", expected_revision: task.revision, value: resumedTask },
-      { kind: "agent_run", expected_revision: run.revision, value: resumedRun },
-    ]);
-    await this.deliverApproval(decided, decision);
-    return this.markApprovalDelivered(decided.approval_id, stringArg(args, "idempotency_key"));
+    return this.management_commands.decideApproval({
+      approval_id: stringArg(args, "approval_id"),
+      decision: decision === "approve" ? "approve" : "reject",
+      ...(decision === "approve"
+        ? {}
+        : { feedback: optionalString(args, "feedback") ?? optionalString(args, "reason") }),
+      preconditions: {
+        session_id: "mcp-stdio",
+        event_cursor: stringArg(args, "event_cursor"),
+        target_revision: integerArg(args, "target_revision"),
+        idempotency_key: stringArg(args, "idempotency_key"),
+      },
+    });
   }
 
   async cancelTask(args: JsonObject): Promise<unknown> {
-    const task = await this.requireTask(stringArg(args, "task_id"));
-    if (task.value.status === "CANCELLED") return task.value;
-    const run = await this.latestRun(task.value.task_id);
-    this.options.active_runs.require(run.value.run_id);
-    const now = this.now().toISOString();
-    const cancelled = transitionTask(task.value, "CANCEL", now);
-    const cancelling = {
-      ...run.value,
-      status: transitionAgentRunStatus(run.value.status, "REQUEST_CANCELLATION"),
-      updated_at: now,
-    };
-    const key = stringArg(args, "idempotency_key");
-    await this.commitRecords("bridge_cancel_task", key, [
-      { kind: "task", expected_revision: task.revision, value: cancelled },
-      { kind: "agent_run", expected_revision: run.revision, value: cancelling },
-    ]);
-    await this.options.active_runs.cancel(run.value.run_id, stringArg(args, "reason"));
-    const latestRun = await this.options.repository.getAgentRun(run.value.run_id);
-    if (latestRun === undefined) throw controlError("RUN_NOT_FOUND");
-    if (latestRun.value.status === "cancelled") return cancelled;
-    const bindings = await this.options.repository.listAgentSessionBindings(run.value.run_id);
-    const activeBinding = bindings.find((item) => item.value.status === "ACTIVE");
-    const confirmedAt = this.now().toISOString();
-    const confirmed = {
-      ...latestRun.value,
-      status: transitionAgentRunStatus(latestRun.value.status, "CONFIRM_CANCELLED"),
-      updated_at: confirmedAt,
-      finished_at: confirmedAt,
-    };
-    const confirmationRecords: DomainRecordWrite[] = [
-      { kind: "agent_run", expected_revision: latestRun.revision, value: confirmed },
-    ];
-    if (activeBinding !== undefined) {
-      confirmationRecords.push({
-        kind: "agent_session_binding",
-        expected_revision: activeBinding.revision,
-        value: transitionAgentSessionBinding(activeBinding.value, "CLOSE", confirmedAt),
-      });
+    return this.management_commands.confirmRunAction({
+      action: "cancel",
+      run_id: stringArg(args, "run_id"),
+      confirmation_token: stringArg(args, "confirmation_token"),
+      preconditions: {
+        session_id: "mcp-stdio",
+        event_cursor: stringArg(args, "event_cursor"),
+        target_revision: integerArg(args, "target_revision"),
+        idempotency_key: stringArg(args, "idempotency_key"),
+      },
+    });
+  }
+
+  async previewRunAction(args: JsonObject): Promise<unknown> {
+    const action = stringArg(args, "action");
+    if (action !== "retry" && action !== "cancel" && action !== "cleanup") {
+      throw controlError("INVALID_ARGUMENT", { field: "action" });
     }
-    await this.commitRecords("bridge_cancel_task_confirm", `${key}:confirm`, confirmationRecords);
-    return cancelled;
+    return this.management_commands.previewRunAction({
+      session_id: "mcp-stdio",
+      action,
+      run_id: stringArg(args, "run_id"),
+    });
+  }
+
+  async confirmRunAction(args: JsonObject): Promise<unknown> {
+    const action = stringArg(args, "action");
+    if (action !== "retry" && action !== "cancel" && action !== "cleanup") {
+      throw controlError("INVALID_ARGUMENT", { field: "action" });
+    }
+    return this.management_commands.confirmRunAction({
+      action,
+      run_id: stringArg(args, "run_id"),
+      confirmation_token: stringArg(args, "confirmation_token"),
+      preconditions: {
+        session_id: "mcp-stdio",
+        event_cursor: stringArg(args, "event_cursor"),
+        target_revision: integerArg(args, "target_revision"),
+        idempotency_key: stringArg(args, "idempotency_key"),
+      },
+    });
   }
 
   async markCompleted(args: JsonObject): Promise<unknown> {
@@ -1044,32 +999,6 @@ export class BridgeControlService {
     )
       throw controlError("RUN_SCOPE_INVALID");
     this.options.active_runs.require(runId);
-  }
-
-  private deliverApproval(approval: ApprovalRequest, decision: "approve" | "deny"): Promise<void> {
-    return this.options.active_runs.respondToPermission(
-      approval.run_id,
-      approval.permission_id ?? "",
-      approval.tool_call_id ?? "",
-      decision === "approve" ? "allow" : "deny",
-      approval.reason ?? "",
-    );
-  }
-
-  private async markApprovalDelivered(
-    approvalId: string,
-    idempotencyKey: string,
-  ): Promise<ApprovalRequest> {
-    const stored = await this.options.repository.getApprovalRequest(approvalId);
-    if (stored === undefined) throw controlError("APPROVAL_NOT_FOUND");
-    const delivered: ApprovalRequest = {
-      ...stored.value,
-      metadata: { ...stored.value.metadata, delivery_status: "delivered" },
-    };
-    await this.commitRecords("bridge_approval_delivered", `${idempotencyKey}:delivered`, [
-      { kind: "approval_request", expected_revision: stored.revision, value: delivered },
-    ]);
-    return delivered;
   }
 
   private audit(operation: string, idempotencyKey: string): RuntimeAuditInput {

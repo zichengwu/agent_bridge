@@ -128,6 +128,7 @@ export interface IdempotencyDescriptor {
 export interface DomainWriteRequest {
   readonly change_id: string;
   readonly idempotency: IdempotencyDescriptor;
+  readonly expected_event_cursor?: string;
   readonly records: readonly DomainRecordWrite[];
   readonly events: readonly AuthoritativeDomainEvent[];
 }
@@ -278,8 +279,17 @@ const AGENT_ROLES = [
 export function readDomainWriteRequest(value: unknown): DomainWriteRequest {
   if (
     !isPlainRecord(value) ||
-    !hasOnlyKeys(value, ["change_id", "idempotency", "records", "events"]) ||
+    !hasOnlyKeys(value, [
+      "change_id",
+      "idempotency",
+      "expected_event_cursor",
+      "records",
+      "events",
+    ]) ||
     !isIdentifier(value.change_id) ||
+    (value.expected_event_cursor !== undefined &&
+      (typeof value.expected_event_cursor !== "string" ||
+        !/^event-cursor:(0|[1-9][0-9]*)$/u.test(value.expected_event_cursor))) ||
     !Array.isArray(value.records) ||
     !Array.isArray(value.events) ||
     value.events.length === 0
@@ -341,6 +351,9 @@ export function readDomainWriteRequest(value: unknown): DomainWriteRequest {
   return Object.freeze({
     change_id: value.change_id,
     idempotency,
+    ...(value.expected_event_cursor === undefined
+      ? {}
+      : { expected_event_cursor: value.expected_event_cursor }),
     records: Object.freeze(records),
     events: Object.freeze(events),
   });

@@ -45,6 +45,8 @@ export interface PrepareRuntimeContextRequest {
   readonly repository_id: string;
   readonly repository_path: string;
   readonly selected_handoffs: readonly SelectedHandoffVersion[];
+  readonly failure_summary?: import("@agent-bridge/core").FailureSummaryInput;
+  readonly expected_event_cursor?: string;
   readonly audit: RuntimeAuditInput;
 }
 
@@ -169,6 +171,9 @@ export class ContextHandoffRuntime {
       created_at: request.audit.occurred_at,
       project_baseline: request.project_baseline,
       handoff_selection: selection,
+      ...(request.failure_summary === undefined
+        ? {}
+        : { failure_summary: request.failure_summary }),
     });
 
     await this.repository.commit({
@@ -182,6 +187,9 @@ export class ContextHandoffRuntime {
           content_hash: assembled.context_package.content_hash,
         }),
       },
+      ...(request.expected_event_cursor === undefined
+        ? {}
+        : { expected_event_cursor: request.expected_event_cursor }),
       records: [
         {
           kind: "context_package",
