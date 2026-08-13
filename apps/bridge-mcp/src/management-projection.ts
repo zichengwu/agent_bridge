@@ -208,6 +208,12 @@ export class ManagementProjectionService {
     this.snapshotAttempts = readSnapshotAttempts(options.snapshot_attempts);
   }
 
+  async getCurrentCursor(): Promise<string> {
+    const cursor = await this.options.repository.getEventCursor();
+    decodeEventCursor(cursor);
+    return cursor;
+  }
+
   async getDashboard(
     range: ManagementRangeKind = "today",
   ): Promise<ManagementSnapshot<ManagementDashboard>> {

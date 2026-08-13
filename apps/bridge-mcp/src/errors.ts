@@ -41,7 +41,8 @@ export function classifyBridgeError(code: string): {
   if (
     code === "STALE_EVENT_CURSOR" ||
     code === "ETAG_MISMATCH" ||
-    code === "CONFIRMATION_EXPIRED"
+    code === "CONFIRMATION_EXPIRED" ||
+    code === "BRIDGE_INSTANCE_CONFLICT"
   ) {
     return { category: "CONFLICT", retryable: true };
   }

@@ -21,14 +21,20 @@ import {
 
 import { BridgeControlService } from "./bridge-control-service.js";
 import { controlError } from "./errors.js";
+import { acquireBridgeInstanceLock } from "./instance-lock.js";
 import { LocalBridgeRuntime } from "./local-runtime.js";
-import type { ManagementCommandService } from "./management-command-service.js";
+import { ManagementCommandService } from "./management-command-service.js";
+import { ManagementProjectionService } from "./management-projection.js";
 import { OutboxPump } from "./outbox-pump.js";
 
 export interface BridgeApplication {
   readonly service: BridgeControlService;
   readonly management_commands: ManagementCommandService;
+  readonly management_projection: ManagementProjectionService;
   readonly events: PersistentEventFanout;
+  readonly server_instance_id: string;
+  readonly server_started_at: string;
+  readonly timezone: string;
   close(): Promise<void>;
 }
 
@@ -36,13 +42,17 @@ export async function bootstrapBridgeApplication(configPath: string): Promise<Br
   const configuration = await loadRuntimeConfiguration(configPath);
   await runRuntimePreflight(configuration);
   await mkdir(configuration.project.runtime_root, { recursive: true });
-  const repository = new SqliteDomainRepository({
-    database_path: resolve(configuration.project.runtime_root, "agent-bridge.sqlite"),
-  });
+  const instanceLock = await acquireBridgeInstanceLock(configuration.project.runtime_root);
+  const serverStartedAt = new Date().toISOString();
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const activeRuns = new ActiveRunRegistry();
   let outbox: OutboxPump | undefined;
   let events: PersistentEventFanout | undefined;
+  let repository: SqliteDomainRepository | undefined;
   try {
+    repository = new SqliteDomainRepository({
+      database_path: resolve(configuration.project.runtime_root, "agent-bridge.sqlite"),
+    });
     await ensureProjectBaseline(
       repository,
       configuration.project.id,
@@ -60,6 +70,15 @@ export async function bootstrapBridgeApplication(configPath: string): Promise<Br
       repository.createLeaseManager(),
       artifacts,
     );
+    const managementCommands = new ManagementCommandService({
+      repository,
+      contexts,
+      active_runs: activeRuns,
+      runtime,
+      project_id: configuration.project.id,
+      repository_path: configuration.project.workspace_root,
+      server_instance_id: instanceLock.instance_id,
+    });
     const service = new BridgeControlService({
       repository,
       contexts,
@@ -70,6 +89,7 @@ export async function bootstrapBridgeApplication(configPath: string): Promise<Br
       max_review_cycles: configuration.limits.max_review_cycles,
       timeout_seconds: configuration.limits.timeout_seconds,
       max_agent_count: configuration.limits.max_agent_count,
+      management_commands: managementCommands,
     });
     runtime.setEventListener((runId, event) => service.onAgentEvent(event, runId));
     await runtime.recoverPersistedRuns();
@@ -80,22 +100,36 @@ export async function bootstrapBridgeApplication(configPath: string): Promise<Br
     );
     await outbox.drain();
     outbox.start();
+    const managementProjection = new ManagementProjectionService({
+      repository,
+      server_started_at: serverStartedAt,
+      timezone,
+    });
+    let closed = false;
     return Object.freeze({
       service,
-      management_commands: service.management_commands,
+      management_commands: managementCommands,
+      management_projection: managementProjection,
       events,
+      server_instance_id: instanceLock.instance_id,
+      server_started_at: serverStartedAt,
+      timezone,
       close: async () => {
+        if (closed) return;
+        closed = true;
         await outbox?.stop();
         events?.stop();
         await activeRuns.closeAll();
-        repository.close();
+        repository?.close();
+        await instanceLock.release();
       },
     });
   } catch (error) {
     await outbox?.stop();
     events?.stop();
     await activeRuns.closeAll();
-    repository.close();
+    repository?.close();
+    await instanceLock.release();
     throw error;
   }
 }
