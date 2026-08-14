@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Bridge · 本地管理页</title>
+    <link rel="stylesheet" href="/assets/dashboard.807c5263.css" />
+    <script type="module" src="/assets/dashboard.d7edfe43.js"></script>
+  </head>
+  <body>
+    <div class="app-shell" data-connection="booting" data-view="board">
+      <aside class="side-nav" aria-label="主导航">
+        <div class="product-name">
+          Agent Bridge
+          <span class="product-badge">本地单用户</span>
+        </div>
+        <nav class="nav-list">
+          <button class="nav-item is-active" type="button" data-view-target="board">
+            运行与处置
+          </button>
+          <button class="nav-item" type="button" data-view-target="history">全部任务</button>
+        </nav>
+        <div class="connection">
+          <div class="connection-status">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="connection-text">正在建立本地会话</span>
+          </div>
+          <div id="connection-detail">页面保持只读</div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="workspace-head">
+          <div>
+            <p class="eyebrow">权威 Repository 投影</p>
+            <h1 id="page-title">运行与处置</h1>
+          </div>
+          <p class="head-note" id="page-note">
+            先看总体负载，再处理需要人的事项。这里不创建任务，也不估算完成百分比。
+          </p>
+        </header>
+
+        <div class="runtime-banner" id="runtime-banner" role="status">
+          <strong id="runtime-banner-title">正在读取权威状态</strong>
+          <span id="runtime-banner-detail">写操作将在事件流与快照完全追平后启用。</span>
+        </div>
+
+        <section class="board-view" id="board-view" aria-labelledby="overview-title">
+          <section class="overview">
+            <header class="overview-head">
+              <div>
+                <p class="section-kicker">概览</p>
+                <h2 id="overview-title">今日运行摘要</h2>
+              </div>
+              <div class="range-switch" role="group" aria-label="统计时间范围">
+                <button type="button" data-range="session" aria-pressed="false">本次会话</button>
+                <button class="is-active" type="button" data-range="today" aria-pressed="true">
+                  今日
+                </button>
+                <button type="button" data-range="7d" aria-pressed="false">最近 7 天</button>
+              </div>
+            </header>
+
+            <div class="metric-grid" aria-live="polite">
+              <article class="metric-card">
+                <span class="metric-label">任务总数</span>
+                <strong class="metric-value" id="metric-total">—</strong>
+                <span class="metric-foot" id="metric-total-foot">正在读取</span>
+              </article>
+              <article class="metric-card running">
+                <span class="metric-label">运行中</span>
+                <strong class="metric-value" id="metric-running">—</strong>
+                <span class="metric-foot">按权威状态统计</span>
+              </article>
+              <article class="metric-card attention">
+                <span class="metric-label">需要处理</span>
+                <strong class="metric-value" id="metric-attention">—</strong>
+                <span class="metric-foot" id="metric-attention-foot">正在读取</span>
+              </article>
+              <article class="metric-card token">
+                <span class="metric-label">Token 消耗</span>
+                <strong class="metric-value" id="metric-token">—</strong>
+                <span class="metric-foot" id="metric-token-foot">未上报</span>
+              </article>
+            </div>
+
+            <div class="analytics-grid">
+              <article class="chart-card">
+                <header class="chart-head">
+                  <div>
+                    <h3>任务耗时区间</h3>
+                    <p>按任务当前累计耗时分组</p>
+                  </div>
+                  <span class="chart-unit" id="duration-unit">—</span>
+                </header>
+                <div class="duration-bars" id="duration-bars"></div>
+                <p class="data-note" id="duration-note"></p>
+              </article>
+              <article class="chart-card token-card">
+                <header class="chart-head">
+                  <div>
+                    <h3>Token 构成</h3>
+                    <p>仅统计 Driver 已上报的 usage</p>
+                  </div>
+                  <span class="reporting-status" id="token-reporting">未上报</span>
+                </header>
+                <div class="token-summary">
+                  <strong id="token-chart-total">—</strong><span>总消耗</span>
+                </div>
+                <div class="token-stack" id="token-stack" aria-label="Token 数据未上报">
+                  <span class="token-input"></span>
+                  <span class="token-output"></span>
+                  <span class="token-cache-read"></span>
+                  <span class="token-cache-write"></span>
+                </div>
+                <div class="token-legend">
+                  <span><i class="token-input"></i>输入 <strong id="token-input">—</strong></span>
+                  <span><i class="token-output"></i>输出 <strong id="token-output">—</strong></span>
+                  <span
+                    ><i class="token-cache-read"></i>缓存读
+                    <strong id="token-cache-read">—</strong></span
+                  >
+                  <span
+                    ><i class="token-cache-write"></i>缓存写
+                    <strong id="token-cache-write">—</strong></span
+                  >
+                </div>
+                <p class="data-note" id="token-note">缺失 usage 不按 0 计算。</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="operations" aria-labelledby="operations-title">
+            <header class="operations-head">
+              <div>
+                <p class="section-kicker">实时状态</p>
+                <h2 id="operations-title">当前运行与处置</h2>
+              </div>
+              <span class="attention-summary" id="attention-summary">正在读取</span>
+            </header>
+            <div class="board-state-panel" id="board-state-panel" role="status">
+              <span class="state-mark" aria-hidden="true"></span>
+              <div>
+                <strong id="board-state-title">正在读取权威状态</strong>
+                <p id="board-state-detail">正在恢复任务、审批和事件。</p>
+              </div>
+              <button class="state-retry" id="state-retry" type="button">重新读取</button>
+            </div>
+            <div class="board-grid" id="board-grid" hidden>
+              <section class="lane lane-running" aria-labelledby="running-title">
+                <header class="lane-heading">
+                  <h3 id="running-title">运行中</h3>
+                  <span class="count" id="running-count">00</span>
+                </header>
+                <div class="task-list" id="running-list"></div>
+              </section>
+              <section class="lane lane-approval" aria-labelledby="approval-title">
+                <header class="lane-heading">
+                  <h3 id="approval-title">待审批</h3>
+                  <span class="count" id="approval-count">00</span>
+                </header>
+                <div class="task-list" id="approval-list"></div>
+              </section>
+              <section class="lane lane-anomaly" aria-labelledby="anomaly-title">
+                <header class="lane-heading">
+                  <h3 id="anomaly-title">异常</h3>
+                  <span class="count" id="anomaly-count">00</span>
+                </header>
+                <div class="task-list" id="anomaly-list"></div>
+              </section>
+            </div>
+          </section>
+        </section>
+
+        <section class="history-view" id="history-view" aria-labelledby="history-title" hidden>
+          <header class="history-head">
+            <div>
+              <p class="section-kicker">历史</p>
+              <h2 id="history-title">全部任务</h2>
+            </div>
+            <span class="chart-unit" id="history-count">—</span>
+          </header>
+          <div class="history-columns" aria-hidden="true">
+            <span>任务</span><span>状态</span><span>阶段</span><span>耗时</span>
+          </div>
+          <div class="history-list" id="history-list"></div>
+        </section>
+      </main>
+
+      <aside
+        class="detail-drawer"
+        id="detail-drawer"
+        aria-label="任务详情"
+        aria-hidden="true"
+        inert
+      >
+        <header class="drawer-head">
+          <div>
+            <span class="tone-label" id="drawer-tone">任务详情</span>
+            <h2 id="drawer-title">—</h2>
+          </div>
+          <button class="close-button" type="button" id="close-drawer">收起</button>
+        </header>
+        <div class="drawer-body">
+          <section class="detail-block">
+            <h3>任务上下文</h3>
+            <dl class="fact-grid" id="drawer-facts"></dl>
+          </section>
+          <section class="detail-block">
+            <h3>最近事件</h3>
+            <p class="event-line" id="drawer-event">—</p>
+          </section>
+          <section class="detail-block">
+            <h3>验证与 Token</h3>
+            <p id="drawer-result">—</p>
+          </section>
+          <section class="detail-block" id="approval-block" hidden>
+            <h3>审批影响</h3>
+            <p id="approval-summary">—</p>
+            <label class="reason-field" for="approval-feedback">
+              <span>拒绝时必须填写反馈</span>
+              <textarea id="approval-feedback" rows="3" maxlength="2000"></textarea>
+              <small id="approval-feedback-error" hidden>请输入 1–2000 个字符的反馈。</small>
+            </label>
+          </section>
+        </div>
+        <footer class="drawer-actions" id="drawer-actions"></footer>
+      </aside>
+    </div>
+
+    <dialog class="risk-dialog" id="risk-dialog" aria-labelledby="risk-dialog-title">
+      <form method="dialog">
+        <header class="risk-dialog-head">
+          <span class="tone-label tone-anomaly">需要二次确认</span>
+          <h2 id="risk-dialog-title">确认操作？</h2>
+          <p>作用范围与影响来自当前权威命令预览。</p>
+        </header>
+        <div class="risk-dialog-body">
+          <section>
+            <h3>影响范围</h3>
+            <ul id="risk-effects"></ul>
+          </section>
+          <section>
+            <h3>风险与建议</h3>
+            <ul id="risk-warnings"></ul>
+          </section>
+          <p class="dialog-expiry" id="risk-expiry"></p>
+        </div>
+        <footer class="risk-dialog-actions">
+          <button class="action-button" type="submit" value="cancel">返回检查</button>
+          <button class="action-button danger" id="risk-confirm" type="button">确认操作</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

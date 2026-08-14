@@ -325,6 +325,28 @@ describe("Slice C management HTTP contract", () => {
     expect(fixture.calls.decision).toBe(1);
   });
 
+  it("OPS-011 关闭第一阶段立即停止管理写入，且不会触达共享命令服务", async () => {
+    const fixture = await startFixture();
+    const session = await exchange(fixture);
+    fixture.server.stopAcceptingWrites();
+    const read = await send(fixture.server, {
+      path: "/internal/v1/dashboard",
+      headers: internalHeaders(fixture.server, { cookie: session.cookiePair }),
+    });
+    const write = await send(fixture.server, {
+      method: "POST",
+      path: "/internal/v1/approvals/approval-1/decision",
+      headers: writeHeaders(fixture.server, session),
+      body: { schema_version: 1, decision: "approve" },
+    });
+    expect(read.status).toBe(200);
+    expect(write).toMatchObject({
+      status: 503,
+      json: { error: { code: "RECOVERY_IN_PROGRESS", retryable: true } },
+    });
+    expect(fixture.calls.decision).toBe(0);
+  });
+
   it("Slice D 前生产默认 stream 门禁 fail closed，不伪造可写连接", async () => {
     const fixture = await startFixture({ allowStream: false });
     const session = await exchange(fixture);

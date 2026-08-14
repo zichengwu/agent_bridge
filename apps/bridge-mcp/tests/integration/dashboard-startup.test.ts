@@ -56,7 +56,15 @@ describe("Slice C dashboard startup", () => {
     });
     expect(order).toEqual(["recover", "listen", "secret", "open"]);
     await dashboard.close();
-    expect(order).toEqual(["recover", "listen", "secret", "open", "http-close", "close"]);
+    expect(order).toEqual([
+      "recover",
+      "listen",
+      "secret",
+      "open",
+      "stop-writes",
+      "http-close",
+      "close",
+    ]);
   });
 
   it("OPS-003 opener 失败会撤销秘密、停止 HTTP 和应用，错误不含秘密 URL", async () => {
@@ -80,7 +88,7 @@ describe("Slice C dashboard startup", () => {
     expect(capturedUrl).toContain("#launch_secret=launch-secret-value");
     expect(thrown).toMatchObject({ code: "DASHBOARD_OPEN_FAILED" });
     expect(JSON.stringify(thrown)).not.toContain(capturedUrl);
-    expect(order).toEqual(["secret", "revoke", "http-close", "application-close"]);
+    expect(order).toEqual(["secret", "revoke", "stop-writes", "http-close", "application-close"]);
   });
 
   it("OPS-004 同 runtime_root 第二实例稳定冲突，不接管或终止第一实例", async () => {
@@ -122,6 +130,7 @@ function fakeHttp(order: string[]): StartedManagementHttpServer {
       return "launch-secret-value";
     },
     revokeLaunchSecret: () => order.push("revoke"),
+    stopAcceptingWrites: () => order.push("stop-writes"),
     close: () => {
       order.push("http-close");
       return Promise.resolve();

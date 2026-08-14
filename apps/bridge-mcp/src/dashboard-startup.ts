@@ -71,12 +71,14 @@ export async function startBridgeDashboard(
       close: async () => {
         if (closed) return;
         closed = true;
+        http?.stopAcceptingWrites();
         await http?.close();
         await application.close();
       },
     });
   } catch (error) {
     http?.revokeLaunchSecret();
+    http?.stopAcceptingWrites();
     await http?.close().catch(() => undefined);
     await application.close().catch(() => undefined);
     throw error;
