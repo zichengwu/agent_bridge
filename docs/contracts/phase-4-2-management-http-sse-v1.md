@@ -36,10 +36,13 @@ dashboard-only 与 MCP + dashboard 是同一组合根的两种互斥启动模式
 - 仅绑定 127.0.0.1，端口默认由操作系统分配。
 - advertised_origin 必须是 http://127.0.0.1:<port>。
 - 请求 Host 必须精确等于 127.0.0.1:<port>。
-- 会改变状态的请求、会话交换和 SSE 必须具有精确 Origin。
+- 会改变状态的请求和会话交换必须具有精确 Origin。
+- SSE 与 run action preview 是浏览器同源安全 GET：Origin 存在时必须精确等于 advertised_origin；因原生浏览器同源 GET 不保证发送 Origin，缺失时只在 `Sec-Fetch-Site: same-origin` 以及该路由的会话、媒体类型或客户端标记、当前 stream 门禁全部通过时接受。错误 Origin 始终拒绝。
 - JSON 读取请求必须携带同源页面才能设置的 X-Agent-Bridge-Client: dashboard；Host、会话和 Fetch Metadata 同时校验。缺失或跨站的 Sec-Fetch-Site 取值 fail closed。
 - 不返回 Access-Control-Allow-Origin、Access-Control-Allow-Credentials 或其他 CORS 允许头。
 - 不接受 HTTP Upgrade、代理转发身份头或外部 base URL 覆盖。
+
+规范依据：WHATWG Fetch 将 `Origin` 定义为 [forbidden request-header](https://fetch.spec.whatwg.org/#forbidden-request-header)，并明确说明受兼容性约束它不会出现在所有 fetch 中；同源 `GET`/`HEAD` 不属于保证追加 `Origin` 的分支（[Origin header](https://fetch.spec.whatwg.org/#origin-header)）。HTML 的原生 [EventSource](https://html.spec.whatwg.org/multipage/server-sent-events.html#the-eventsource-interface) 使用浏览器构造的 GET 请求，页面脚本没有自定义请求头入口。
 
 ### 2.3 通用安全响应头
 
@@ -302,10 +305,9 @@ display_stage 是由权威 Task/Run/Approval 事实确定性派生的页面投�
 
     GET /internal/v1/events?after=event-cursor:42
     Accept: text/event-stream
-    Origin: <advertised_origin>
     Cookie: <session>
 
-浏览器自动重连时也可发送 Last-Event-ID。若 query after 与 Last-Event-ID 同时存在且不相等，返回 CURSOR_CONFLICT。未知、过旧或不属于当前事件流的游标发送 bridge.reset 后关闭。
+浏览器发送 Origin 时必须精确等于 advertised_origin；同源原生 EventSource 可缺失。浏览器自动重连时也可发送 Last-Event-ID。若 query after 与 Last-Event-ID 同时存在且不相等，返回 CURSOR_CONFLICT。未知、过旧或不属于当前事件流的游标发送 bridge.reset 后关闭。
 
 每个会话最多 2 条 SSE 连接。超限返回 429 SSE_CONNECTION_LIMIT。响应禁止代理缓冲和缓存。
 
@@ -401,7 +403,7 @@ approve 恢复既有权限请求。reject 必须：
 
     GET /internal/v1/runs/{run_id}/actions/{retry|cancel|cleanup}/preview
 
-预览是只读操作，但仍要求会话、Origin 和当前 SSE stream。返回：
+预览是只读操作，但仍要求会话、同源客户端标记和当前 SSE stream。Origin 存在时必须精确同源；原生同源 GET 缺失 Origin 时按 2.2 节的 Fetch Metadata 与路由门禁处理。返回：
 
     {
       "action": "cancel",
@@ -448,35 +450,35 @@ cleanup：
 
 ## 10. 错误映射
 
-| HTTP | code | category | retryable | 含义 |
-| --- | --- | --- | --- | --- |
-| 400 | VALIDATION_ERROR | validation | false | Schema、枚举或字段不合法 |
-| 400 | REQUEST_BODY_TOO_LARGE | validation | false | 请求体超过 16 KiB |
-| 400 | CURSOR_CONFLICT | validation | false | after 与 Last-Event-ID 冲突 |
-| 400 | IDEMPOTENCY_KEY_REQUIRED | validation | false | 写请求缺少幂等键 |
-| 401 | LAUNCH_SECRET_INVALID | authentication | false | 启动秘密无效、已用或已过期；不区分原因 |
-| 401 | SESSION_REQUIRED | authentication | false | 缺少本地会话 |
-| 401 | SESSION_EXPIRED | authentication | true | 服务重启或会话失效 |
-| 403 | HOST_REJECTED | security | false | Host 不精确 |
-| 403 | ORIGIN_REJECTED | security | false | Origin 不同源 |
-| 403 | CLIENT_CONTEXT_REJECTED | security | false | 读取标记或 Fetch Metadata 不合法 |
-| 403 | CSRF_REJECTED | security | false | CSRF 缺失或错误 |
-| 403 | STREAM_NOT_CURRENT | security | true | SSE 未连接或已被替换 |
-| 404 | RESOURCE_NOT_FOUND | not_found | false | 白名单资源不存在 |
-| 405 | METHOD_NOT_ALLOWED | validation | false | 路由不支持该方法 |
-| 409 | STALE_EVENT_CURSOR | conflict | true | 页面事件游标落后 |
-| 409 | ETAG_MISMATCH | conflict | true | 目标已变化 |
-| 409 | IDEMPOTENCY_KEY_REUSED | conflict | false | 同 key 不同请求 |
-| 409 | CONFIRMATION_EXPIRED | conflict | true | 确认已过期或目标变化 |
-| 409 | ACTION_NOT_ALLOWED | conflict | false | 当前权威状态不允许操作 |
-| 409 | TASK_VERSION_REQUIRED | conflict | false | 重试需要修改 TaskContract |
-| 409 | BRIDGE_INSTANCE_CONFLICT | conflict | true | runtime_root 已被占用 |
-| 415 | UNSUPPORTED_MEDIA_TYPE | validation | false | 非 JSON 写请求 |
-| 428 | PRECONDITION_REQUIRED | validation | false | 缺少 If-Match、事件游标或 stream 前置条件 |
-| 429 | SSE_CONNECTION_LIMIT | capacity | true | 会话 SSE 连接过多 |
-| 503 | SNAPSHOT_BUSY | availability | true | 无法得到一致快照 |
-| 503 | RECOVERY_IN_PROGRESS | availability | true | 启动恢复尚未完成 |
-| 500 | INTERNAL_ERROR | internal | false | 已脱敏的内部错误 |
+| HTTP | code                     | category       | retryable | 含义                                                     |
+| ---- | ------------------------ | -------------- | --------- | -------------------------------------------------------- |
+| 400  | VALIDATION_ERROR         | validation     | false     | Schema、枚举或字段不合法                                 |
+| 400  | REQUEST_BODY_TOO_LARGE   | validation     | false     | 请求体超过 16 KiB                                        |
+| 400  | CURSOR_CONFLICT          | validation     | false     | after 与 Last-Event-ID 冲突                              |
+| 400  | IDEMPOTENCY_KEY_REQUIRED | validation     | false     | 写请求缺少幂等键                                         |
+| 401  | LAUNCH_SECRET_INVALID    | authentication | false     | 启动秘密无效、已用或已过期；不区分原因                   |
+| 401  | SESSION_REQUIRED         | authentication | false     | 缺少本地会话                                             |
+| 401  | SESSION_EXPIRED          | authentication | true      | 服务重启或会话失效                                       |
+| 403  | HOST_REJECTED            | security       | false     | Host 不精确                                              |
+| 403  | ORIGIN_REJECTED          | security       | false     | Origin 存在但不同源，或要求精确 Origin 的请求缺失/不同源 |
+| 403  | CLIENT_CONTEXT_REJECTED  | security       | false     | 读取标记或 Fetch Metadata 不合法                         |
+| 403  | CSRF_REJECTED            | security       | false     | CSRF 缺失或错误                                          |
+| 403  | STREAM_NOT_CURRENT       | security       | true      | SSE 未连接或已被替换                                     |
+| 404  | RESOURCE_NOT_FOUND       | not_found      | false     | 白名单资源不存在                                         |
+| 405  | METHOD_NOT_ALLOWED       | validation     | false     | 路由不支持该方法                                         |
+| 409  | STALE_EVENT_CURSOR       | conflict       | true      | 页面事件游标落后                                         |
+| 409  | ETAG_MISMATCH            | conflict       | true      | 目标已变化                                               |
+| 409  | IDEMPOTENCY_KEY_REUSED   | conflict       | false     | 同 key 不同请求                                          |
+| 409  | CONFIRMATION_EXPIRED     | conflict       | true      | 确认已过期或目标变化                                     |
+| 409  | ACTION_NOT_ALLOWED       | conflict       | false     | 当前权威状态不允许操作                                   |
+| 409  | TASK_VERSION_REQUIRED    | conflict       | false     | 重试需要修改 TaskContract                                |
+| 409  | BRIDGE_INSTANCE_CONFLICT | conflict       | true      | runtime_root 已被占用                                    |
+| 415  | UNSUPPORTED_MEDIA_TYPE   | validation     | false     | 非 JSON 写请求                                           |
+| 428  | PRECONDITION_REQUIRED    | validation     | false     | 缺少 If-Match、事件游标或 stream 前置条件                |
+| 429  | SSE_CONNECTION_LIMIT     | capacity       | true      | 会话 SSE 连接过多                                        |
+| 503  | SNAPSHOT_BUSY            | availability   | true      | 无法得到一致快照                                         |
+| 503  | RECOVERY_IN_PROGRESS     | availability   | true      | 启动恢复尚未完成                                         |
+| 500  | INTERNAL_ERROR           | internal       | false     | 已脱敏的内部错误                                         |
 
 领域/应用错误到 HTTP 的映射只能发生在适配器边界；公开 code 稳定，内部异常名称不构成合同。
 

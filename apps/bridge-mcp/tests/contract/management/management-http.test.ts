@@ -78,6 +78,38 @@ describe("Slice C management HTTP contract", () => {
     expect(options.headers["access-control-allow-origin"]).toBeUndefined();
   });
 
+  it("SEC-003/WRITE-010 原生同源 GET preview 可缺 Origin，但错误 Origin 仍在命令前拒绝", async () => {
+    const fixture = await startFixture();
+    const session = await exchange(fixture);
+    const headers = internalHeaders(fixture.server, {
+      cookie: session.cookiePair,
+      "x-agent-bridge-stream-id": "stream-1",
+    });
+    const nativeBrowser = await send(fixture.server, {
+      path: "/internal/v1/runs/run-1/actions/cancel/preview",
+      headers,
+    });
+    const wrongOrigin = await send(fixture.server, {
+      path: "/internal/v1/runs/run-1/actions/cancel/preview",
+      headers: { ...headers, origin: "http://evil.example" },
+    });
+    const crossSiteWithoutOrigin = await send(fixture.server, {
+      path: "/internal/v1/runs/run-1/actions/cancel/preview",
+      headers: { ...headers, "sec-fetch-site": "cross-site" },
+    });
+
+    expect(nativeBrowser).toMatchObject({ status: 200, json: { data: { action: "cancel" } } });
+    expect(wrongOrigin).toMatchObject({
+      status: 403,
+      json: { error: { code: "ORIGIN_REJECTED" } },
+    });
+    expect(crossSiteWithoutOrigin).toMatchObject({
+      status: 403,
+      json: { error: { code: "CLIENT_CONTEXT_REJECTED" } },
+    });
+    expect(fixture.calls.preview).toBe(1);
+  });
+
   it("SEC-005 首次秘密交换设置随机 host-only Cookie 和内存 CSRF", async () => {
     const fixture = await startFixture();
     const session = await exchange(fixture);
@@ -378,7 +410,7 @@ async function startFixture(
   await writeFile(resolve(root, "outside.txt"), "outside-secret");
   if (options.includeSymlink === true)
     await symlink(resolve(root, "outside.txt"), resolve(root, "linked.txt"));
-  const calls = { dashboard: 0, decision: 0 };
+  const calls = { dashboard: 0, decision: 0, preview: 0 };
   const audit: ManagementHttpAuditEvent[] = [];
   const projection = {
     getCurrentCursor: () => Promise.resolve("event-cursor:5"),
@@ -396,8 +428,9 @@ async function startFixture(
       calls.decision += 1;
       return Promise.resolve({ approval_id: "approval-1", status: "approved" });
     },
-    previewRunAction: () =>
-      Promise.resolve({
+    previewRunAction: () => {
+      calls.preview += 1;
+      return Promise.resolve({
         action: "cancel",
         run_id: "run-1",
         target_revision: 1,
@@ -407,7 +440,8 @@ async function startFixture(
         confirmation_token: "confirmation-token-value",
         expires_at: "2026-08-13T00:01:00.000Z",
         event_cursor: "event-cursor:5",
-      }),
+      });
+    },
     confirmRunAction: () => Promise.resolve({ run_id: "run-1", status: "cancelled" }),
   } as unknown as ManagementHttpOptions["commands"];
   const server = await startManagementHttpServer({

@@ -93,7 +93,7 @@
 
 - 只监听数值回环地址 127.0.0.1，默认请求系统分配随机端口。
 - 禁止 0.0.0.0、局域网地址、主机名监听和隐式 IPv4/IPv6 双栈监听。
-- 每个请求校验精确 Host；状态变更、会话交换和 SSE 校验精确同源 Origin，JSON 读取校验同源客户端标记与 Fetch Metadata；不返回 CORS 允许头。
+- 每个请求校验精确 Host；状态变更和会话交换校验精确同源 Origin。浏览器同源安全 GET 不保证携带 Origin，因此 SSE 与 run action preview 在 Origin 存在时要求精确同源，缺失时必须由 `Sec-Fetch-Site: same-origin` 及各自的会话、媒体类型或客户端标记、当前 stream 门禁共同证明浏览器上下文；JSON 读取继续校验同源客户端标记与 Fetch Metadata；不返回 CORS 允许头。
 - 自动打开浏览器时使用 256-bit 一次性启动秘密，放入 URL fragment；成功交换后立即从地址栏删除。
 - 启动秘密单次使用、60 秒失效，不写入日志、命令输出、持久化对象或前端存储。
 - 交换后建立进程内 host-only 会话 Cookie：每个服务实例使用独立随机 Cookie 名，HttpOnly; SameSite=Strict; Path=/internal/v1，不设置 Domain；HTTP loopback 下不使用要求 Secure 的 __Host- 前缀。
