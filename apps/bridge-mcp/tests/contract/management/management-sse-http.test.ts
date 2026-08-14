@@ -67,6 +67,29 @@ describe("Slice D management SSE contract", () => {
     });
   });
 
+  it("SEC-003/SSE-001 native EventSource GET may omit Origin, but an explicit wrong Origin is rejected", async () => {
+    const fixture = await startFixture();
+    const session = await exchange(fixture.server);
+    const wrongOrigin = await send(fixture.server, {
+      path: "/internal/v1/events?after=event-cursor:5",
+      headers: sseHeaders(fixture.server, session, { origin: "http://evil.example" }),
+    });
+    const crossSiteWithoutOrigin = await send(fixture.server, {
+      path: "/internal/v1/events?after=event-cursor:5",
+      headers: sseHeaders(fixture.server, session, { "sec-fetch-site": "cross-site" }),
+    });
+
+    expect(wrongOrigin).toMatchObject({
+      status: 403,
+      json: { error: { code: "ORIGIN_REJECTED" } },
+    });
+    expect(crossSiteWithoutOrigin).toMatchObject({
+      status: 403,
+      json: { error: { code: "CLIENT_CONTEXT_REJECTED" } },
+    });
+    expect(wrongOrigin.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
   it("SSE-002/SSE-005 Last-Event-ID resumes at the next persistent cursor monotonically", async () => {
     const fixture = await startFixture({ headCursor: "event-cursor:2" });
     const session = await exchange(fixture.server);
@@ -679,9 +702,10 @@ function sseHeaders(
   overrides: Readonly<Record<string, string>> = {},
 ): Record<string, string> {
   return {
-    ...internalHeaders(server, { cookie: session.cookiePair }),
+    host: `127.0.0.1:${server.port}`,
+    cookie: session.cookiePair,
+    "sec-fetch-site": "same-origin",
     accept: "text/event-stream",
-    origin: server.origin,
     ...overrides,
   };
 }

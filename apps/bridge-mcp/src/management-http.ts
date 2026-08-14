@@ -274,7 +274,7 @@ class ManagementHttpController {
         }
         return;
       case "events":
-        assertOrigin(request, this.requireOrigin());
+        assertSafeGetOrigin(request, this.requireOrigin());
         await this.openEventStream(request, response, url);
         return;
       case "dashboard":
@@ -298,7 +298,7 @@ class ManagementHttpController {
         );
         return;
       case "run_preview":
-        assertOrigin(request, this.requireOrigin());
+        assertSafeGetOrigin(request, this.requireOrigin());
         assertClientMarker(request);
         await this.previewRunAction(
           request,
@@ -971,6 +971,11 @@ function assertClientMarker(request: IncomingMessage): void {
 
 function assertOrigin(request: IncomingMessage, expected: string): void {
   if (header(request, "origin") !== expected) throw controlError("ORIGIN_REJECTED");
+}
+
+function assertSafeGetOrigin(request: IncomingMessage, expected: string): void {
+  const candidate = header(request, "origin");
+  if (candidate !== undefined && candidate !== expected) throw controlError("ORIGIN_REJECTED");
 }
 
 function assertCsrf(request: IncomingMessage, expected: string): void {
