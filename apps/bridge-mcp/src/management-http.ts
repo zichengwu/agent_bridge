@@ -75,6 +75,7 @@ export interface StartedManagementHttpServer {
   readonly cookie_name: string;
   activateLaunchSecret(): string;
   revokeLaunchSecret(): void;
+  stopAcceptingWrites(): void;
   close(): Promise<void>;
 }
 
@@ -129,9 +130,11 @@ export async function startManagementHttpServer(
     cookie_name: controller.cookieName,
     activateLaunchSecret: () => controller.activateLaunchSecret(),
     revokeLaunchSecret: () => controller.revokeLaunchSecret(),
+    stopAcceptingWrites: () => controller.stopAcceptingWrites(),
     close: async () => {
       if (closed) return;
       closed = true;
+      controller.stopAcceptingWrites();
       controller.revokeAll();
       await closeServer(server);
     },
@@ -151,6 +154,7 @@ class ManagementHttpController {
   private expectedHost: string | undefined;
   private launchSecret: LaunchSecretRecord | undefined;
   private lastEventCursor = "event-cursor:0";
+  private acceptingWrites = true;
 
   constructor(private readonly options: ManagementHttpOptions) {
     if (!IDENTIFIER_PATTERN.test(options.server_instance_id)) {
@@ -196,6 +200,10 @@ class ManagementHttpController {
 
   revokeLaunchSecret(): void {
     this.launchSecret = undefined;
+  }
+
+  stopAcceptingWrites(): void {
+    this.acceptingWrites = false;
   }
 
   revokeAll(): void {
@@ -248,6 +256,9 @@ class ManagementHttpController {
 
     assertMethod(request.method, route.methods);
     assertFetchMetadata(request);
+    if (!this.acceptingWrites && isManagementWriteRoute(route)) {
+      throw controlError("RECOVERY_IN_PROGRESS");
+    }
     switch (route.name) {
       case "session_exchange":
         assertOrigin(request, this.requireOrigin());
@@ -762,6 +773,10 @@ function classifyRoute(pathname: string): Route {
     };
   }
   return { kind: "unknown", template: "/internal/v1/unknown" };
+}
+
+function isManagementWriteRoute(route: Extract<Route, { kind: "internal" }>): boolean {
+  return route.name === "approval_decision" || route.name === "run_action";
 }
 
 async function listen(server: Server): Promise<void> {
